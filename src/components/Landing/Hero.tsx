@@ -5,10 +5,10 @@ import { useDb } from '../../context/DbContext';
 
 // Buffalo farm slideshow images
 const SLIDESHOW_IMAGES = [
-  'https://images.unsplash.com/photo-1599579425104-f54c4b14be44?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1527018601619-a508a2be00cd?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1516467508483-a7212febe31a?auto=format&fit=crop&w=1200&q=80',
-  'https://images.unsplash.com/photo-1563636619-e9143da7973b?auto=format&fit=crop&w=1200&q=80'
+  '/images/cows_meadow.png',
+  '/images/buffaloes_shed.png',
+  '/images/buffalo_farm.png',
+  '/images/dairy_farm.png'
 ];
 
 export const Hero: React.FC = () => {

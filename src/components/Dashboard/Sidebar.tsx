@@ -7,12 +7,13 @@ import {
   ArrowLeft, 
   Menu, 
   X, 
-  LogOut 
+  LogOut,
+  Settings as SettingsIcon
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useDb } from '../../context/DbContext';
 
-export type DashboardTab = 'dashboard' | 'register' | 'customers' | 'add_customer';
+export type DashboardTab = 'dashboard' | 'register' | 'customers' | 'add_customer' | 'settings';
 
 interface SidebarProps {
   activeTab: DashboardTab;
@@ -28,7 +29,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
     { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
     { id: 'register', name: 'Record Daily Milk', icon: CalendarRange },
     { id: 'customers', name: 'My Customers', icon: Users },
-    { id: 'add_customer', name: 'Add Customer', icon: UserPlus }
+    { id: 'add_customer', name: 'Add Customer', icon: UserPlus },
+    { id: 'settings', name: 'Settings', icon: SettingsIcon }
   ] as const;
 
   const handleTabClick = (tabId: DashboardTab) => {

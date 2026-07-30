@@ -10,7 +10,7 @@ const KEYS = {
 
 export const localDb = {
   initialize: () => {
-    const DB_VERSION_KEY = 'sd_db_version_v2';
+    const DB_VERSION_KEY = 'sd_db_version_v4';
     if (!localStorage.getItem(DB_VERSION_KEY)) {
       localStorage.removeItem(KEYS.CUSTOMERS);
       localStorage.removeItem(KEYS.MILK_ENTRIES);

@@ -24,6 +24,8 @@ interface DbContextType {
   addCustomer: (customerData: Omit<Customer, 'id' | 'customer_code' | 'created_at'>, customCode?: string) => Promise<Customer | null>;
   updateCustomer: (customer: Customer) => Promise<Customer | null>;
   deleteCustomer: (id: string) => Promise<boolean>;
+  deactivateCustomer: (id: string) => Promise<boolean>;
+  reactivateCustomer: (id: string) => Promise<boolean>;
 
   // Milk Operations
   saveMilkEntry: (customerId: string, date: string, quantity: number) => Promise<MilkEntry | null>;
@@ -93,9 +95,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
 
   // Authentication
   const authenticateOwner = (code: string): boolean => {
-    const currentCode = settings?.owner_code || 'mylifemuskan';
+    const currentCode = settings?.owner_code || 'uni2026';
     const trimmedInput = code.trim();
-    if (trimmedInput === currentCode || trimmedInput === 'SALMAN2026' || trimmedInput === 'mylifemuskan') {
+    if (trimmedInput === currentCode) {
       setOwnerAuthenticated(true);
       localStorage.setItem('sd_owner_auth', 'true');
       setLoginError(null);
@@ -164,6 +166,40 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
     setMilkEntries(prev => prev.filter(e => e.customer_id !== id));
     setPayments(prev => prev.filter(p => p.customer_id !== id));
     return true;
+  };
+
+  const deactivateCustomer = async (id: string): Promise<boolean> => {
+    const customer = customers.find(c => c.id === id);
+    if (!customer) return false;
+    
+    const updated = {
+      ...customer,
+      deactivated_at: new Date().toISOString()
+    };
+    
+    const saved = await dbService.saveCustomer(updated);
+    if (saved) {
+      setCustomers(prev => prev.map(c => c.id === saved.id ? saved : c));
+      return true;
+    }
+    return false;
+  };
+
+  const reactivateCustomer = async (id: string): Promise<boolean> => {
+    const customer = customers.find(c => c.id === id);
+    if (!customer) return false;
+    
+    const updated = {
+      ...customer,
+      deactivated_at: null
+    };
+    
+    const saved = await dbService.saveCustomer(updated);
+    if (saved) {
+      setCustomers(prev => prev.map(c => c.id === saved.id ? saved : c));
+      return true;
+    }
+    return false;
   };
 
   // Milk Operations
@@ -285,6 +321,8 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         addCustomer,
         updateCustomer,
         deleteCustomer,
+        deactivateCustomer,
+        reactivateCustomer,
         saveMilkEntry,
         saveMilkEntriesBatch,
         addPayment,

@@ -26,8 +26,8 @@ export const calculateCustomerBilling = (
   customer: Customer,
   milkEntries: MilkEntry[],
   payments: Payment[],
-  currentYear = 2026,
-  currentMonth = 6 // June
+  currentYear = new Date().getFullYear(),
+  currentMonth = new Date().getMonth() + 1
 ): CustomerBillingSummary => {
   const customerEntries = milkEntries.filter(e => e.customer_id === customer.id);
   const customerPayments = payments.filter(p => p.customer_id === customer.id);
@@ -87,19 +87,21 @@ export const calculateDashboardStats = (
   customers: Customer[],
   milkEntries: MilkEntry[],
   payments: Payment[],
-  currentDate = '2026-06-24'
+  currentDate = new Date().toISOString().split('T')[0]
 ) => {
   const currentYear = new Date(currentDate).getFullYear();
   const currentMonth = new Date(currentDate).getMonth() + 1;
 
   let todaySalesLiters = 0;
+  let todayLitresSold = 0;
   let monthlyRevenue = 0;
   let totalPending = 0;
   let totalCollected = 0;
 
-  // Today's Sales
+  // Today's Sales & Litres
   const todayEntries = milkEntries.filter(e => e.date === currentDate);
   todayEntries.forEach(entry => {
+    todayLitresSold += Number(entry.quantity);
     const cust = customers.find(c => c.id === entry.customer_id);
     if (cust) {
       todaySalesLiters += Number(entry.quantity) * cust.rate_per_liter;
@@ -116,6 +118,7 @@ export const calculateDashboardStats = (
 
   return {
     todaySales: todaySalesLiters,
+    todayLitresSold,
     monthlyRevenue,
     pendingPayments: totalPending,
     collectedPayments: totalCollected

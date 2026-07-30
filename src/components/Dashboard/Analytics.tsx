@@ -29,13 +29,30 @@ export const Analytics: React.FC = () => {
       (a, b) => new Date(a.date).getTime() - new Date(b.date).getTime()
     );
 
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+    const currentMonthPrefix = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+
     // Group quantity by date
     sortedEntries.forEach(entry => {
-      // Limit to June 2026 for rich mock data
-      if (entry.date.startsWith('2026-06')) {
+      if (entry.date.startsWith(currentMonthPrefix)) {
         datesMap[entry.date] = (datesMap[entry.date] || 0) + Number(entry.quantity);
       }
     });
+
+    // Fallback: if there are no entries for the current month yet (e.g. new active month starting),
+    // display entries for the latest month that has records to keep the visual charts realistic.
+    if (Object.keys(datesMap).length === 0) {
+      const latestEntry = sortedEntries[sortedEntries.length - 1];
+      if (latestEntry) {
+        const latestMonthPrefix = latestEntry.date.substring(0, 7);
+        sortedEntries.forEach(entry => {
+          if (entry.date.startsWith(latestMonthPrefix)) {
+            datesMap[entry.date] = (datesMap[entry.date] || 0) + Number(entry.quantity);
+          }
+        });
+      }
+    }
 
     // Convert map to array and take last 10 records
     return Object.entries(datesMap)
@@ -54,8 +71,11 @@ export const Analytics: React.FC = () => {
     let collected = 0;
     let pending = 0;
 
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+
     customers.forEach(customer => {
-      const summary = calculateCustomerBilling(customer, milkEntries, payments, 2026, 6);
+      const summary = calculateCustomerBilling(customer, milkEntries, payments, currentYear, currentMonth);
       collected += summary.totalPaid;
       pending += summary.pendingAmount;
     });
@@ -66,10 +86,13 @@ export const Analytics: React.FC = () => {
     ];
   }, [customers, milkEntries, payments]);
 
-  // 3. Top Customers by Liter Consumption (June 2026)
+  // 3. Top Customers by Liter Consumption (Current Month)
   const topCustomersData = useMemo(() => {
+    const currentYear = new Date().getFullYear();
+    const currentMonth = new Date().getMonth() + 1;
+
     const data = customers.map(customer => {
-      const summary = calculateCustomerBilling(customer, milkEntries, payments, 2026, 6);
+      const summary = calculateCustomerBilling(customer, milkEntries, payments, currentYear, currentMonth);
       return {
         name: customer.name,
         litres: Number(summary.monthlyConsumption.toFixed(1))

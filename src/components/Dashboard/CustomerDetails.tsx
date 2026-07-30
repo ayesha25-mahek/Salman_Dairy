@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Customer } from '../../utils/seedData';
+import { Customer, MilkEntry, Payment } from '../../utils/seedData';
 import { useDb } from '../../context/DbContext';
 import { calculateCustomerBilling, formatCurrency } from '../../utils/calculations';
 import { printReceipt, exportRegisterToCSV } from '../../services/pdfGenerator';
@@ -14,7 +14,8 @@ import {
   Trash2, 
   Check, 
   AlertCircle,
-  CalendarDays
+  CalendarDays,
+  RotateCcw
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -24,25 +25,80 @@ interface CustomerDetailsProps {
 }
 
 export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBack }) => {
-  const { milkEntries, payments, addPayment, deletePayment, deleteCustomer } = useDb();
+  const { 
+    milkEntries, 
+    payments, 
+    addPayment, 
+    deletePayment, 
+    deleteCustomer, 
+    deactivateCustomer, 
+    reactivateCustomer 
+  } = useDb();
   
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   
   // Payment Form State
   const [amount, setAmount] = useState('');
-  const [paymentDate, setPaymentDate] = useState('2026-06-24');
-  const [paidTillDate, setPaidTillDate] = useState('2026-06-24');
   const [notes, setNotes] = useState('');
   const [modalStatus, setModalStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
 
-  // Compute billing summary for June 2026 (current active month)
-  const billing = calculateCustomerBilling(customer, milkEntries, payments, 2026, 6);
+  // Get today's local date string YYYY-MM-DD
+  const getTodayStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  const todayStr = getTodayStr();
+
+  const currentYear = new Date().getFullYear();
+  const currentMonth = new Date().getMonth() + 1;
+  const currentMonthName = new Date().toLocaleString('default', { month: 'long' });
+
+  // Compute billing summary for current month
+  const billing = calculateCustomerBilling(customer, milkEntries, payments, currentYear, currentMonth);
 
   const cleanPhone = customer.phone ? customer.phone.replace(/[^0-9]/g, '') : '';
 
-  // WhatsApp template generator
+  // Helper to add 1 day to date string (YYYY-MM-DD)
+  const getNextDay = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    d.setDate(d.getDate() + 1);
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
+  // Compute unpaid bill period and amount
+  const unpaidInfo = React.useMemo(() => {
+    const customerPayments = payments.filter(p => p.customer_id === customer.id);
+    let unpaidStartDate = customer.created_at ? customer.created_at.split('T')[0] : todayStr;
+    
+    if (customerPayments.length > 0) {
+      // Find latest paid_till_date
+      const sortedByPaidTill = [...customerPayments].sort((a, b) => b.paid_till_date.localeCompare(a.paid_till_date));
+      const lastPaidTill = sortedByPaidTill[0].paid_till_date;
+      unpaidStartDate = getNextDay(lastPaidTill);
+    }
+
+    // Filter milk entries from unpaidStartDate up to today
+    const unpaidEntries = milkEntries.filter(
+      e => e.customer_id === customer.id && e.date >= unpaidStartDate && e.date <= todayStr
+    );
+    const unpaidLiters = unpaidEntries.reduce((sum, e) => sum + Number(e.quantity), 0);
+    const unpaidCost = unpaidLiters * customer.rate_per_liter;
+
+    return {
+      unpaidStartDate,
+      unpaidLiters,
+      unpaidCost
+    };
+  }, [customer, milkEntries, payments]);
+
+  // WhatsApp template for entire month bill
   const getWhatsAppMessage = () => {
-    const monthName = 'June 2026';
     const msg = `Assalam-o-Alaikum ${customer.name},\n\nThis is your monthly bill from *Salman Dairy*:\n` +
       `• Code: *${customer.customer_code}*\n` +
       `• Total Milk: *${billing.monthlyConsumption.toFixed(1)} Litres*\n` +
@@ -54,17 +110,56 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
     return encodeURIComponent(msg);
   };
 
+  // Short WhatsApp bill message for unpaid period
+  const getWhatsAppUnpaidMessage = () => {
+    const msg =
+      `Assalam-o-Alaikum *${customer.name}* 🥛\n` +
+      `*Salman Dairy — Unpaid Bill*\n\n` +
+      `📅 Period: ${unpaidInfo.unpaidStartDate} → ${todayStr}\n` +
+      `🧴 Milk: *${unpaidInfo.unpaidLiters.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
+      `💰 Due Amount: *${formatCurrency(billing.pendingAmount)}*\n\n` +
+      `Kindly clear your dues. Shukriya! 🙏`;
+    return encodeURIComponent(msg);
+  };
+
   const handleMarkPayment = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!amount || Number(amount) <= 0) return;
 
     setModalStatus('saving');
     try {
+      // Calculate paid_till_date automatically based on chronological deliveries
+      const customerEntries = milkEntries
+        .filter(e => e.customer_id === customer.id)
+        .sort((a, b) => a.date.localeCompare(b.date));
+
+      const customerPayments = payments.filter(p => p.customer_id === customer.id);
+      const totalPaidBefore = customerPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+      const newTotalPaid = totalPaidBefore + Number(amount);
+
+      let computedPaidTill = customer.created_at ? customer.created_at.split('T')[0] : todayStr;
+      let cumulativeBill = 0;
+
+      for (const entry of customerEntries) {
+        const cost = Number(entry.quantity) * customer.rate_per_liter;
+        if (cumulativeBill + cost <= newTotalPaid) {
+          cumulativeBill += cost;
+          computedPaidTill = entry.date;
+        } else {
+          break;
+        }
+      }
+
+      if (newTotalPaid >= cumulativeBill && customerEntries.length > 0) {
+        const lastEntryDate = customerEntries[customerEntries.length - 1].date;
+        computedPaidTill = lastEntryDate > todayStr ? lastEntryDate : todayStr;
+      }
+
       const res = await addPayment({
         customer_id: customer.id,
         amount: Number(amount),
-        payment_date: paymentDate,
-        paid_till_date: paidTillDate,
+        payment_date: todayStr, // Record as today's date
+        paid_till_date: computedPaidTill, // Automatically computed cover date
         notes: notes.trim()
       });
 
@@ -87,9 +182,27 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
 
   const handleDropCustomer = async () => {
     const confirmDrop = window.confirm(
-      `Are you sure you want to drop ${customer.name}? This customer will not take milk anymore, and all their data will be deleted.`
+      `Are you sure you want to stop milk deliveries for ${customer.name}? They will be removed from the daily register starting next month, but their billing history for this month will be saved.`
     );
     if (confirmDrop) {
+      await deactivateCustomer(customer.id);
+    }
+  };
+
+  const handleReactivateCustomer = async () => {
+    const confirmReactivate = window.confirm(
+      `Reactivate deliveries for ${customer.name}?`
+    );
+    if (confirmReactivate) {
+      await reactivateCustomer(customer.id);
+    }
+  };
+
+  const handlePermanentDelete = async () => {
+    const confirmDelete = window.confirm(
+      `⚠️ WARNING: Are you absolutely sure you want to permanently delete ${customer.name} and ALL their historical billing and payment records? This cannot be undone.`
+    );
+    if (confirmDelete) {
       await deleteCustomer(customer.id);
       onBack();
     }
@@ -106,9 +219,34 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
     day: 'numeric'
   });
 
+  const handleSendUnpaidBill = () => {
+    // Send the bill details directly via WhatsApp
+    if (cleanPhone) {
+      const url = `https://wa.me/${cleanPhone}?text=${getWhatsAppUnpaidMessage()}`;
+      window.open(url, '_blank');
+    }
+  };
+
   return (
     <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-3xl p-6 shadow-sm space-y-6 text-left">
       
+      {/* Deactivation Banner */}
+      {customer.deactivated_at && (
+        <div className="flex items-center justify-between p-4.5 rounded-2xl bg-orange-500/10 border border-orange-500/20 text-orange-600 dark:text-orange-400 text-xs font-bold leading-normal">
+          <div className="flex items-center gap-2">
+            <AlertCircle size={16} className="shrink-0 text-orange-500" />
+            <span>Deliveries stopped since {new Date(customer.deactivated_at).toLocaleDateString()}.</span>
+          </div>
+          <button
+            onClick={handleReactivateCustomer}
+            className="flex items-center gap-1 px-3 py-1.5 bg-orange-500 hover:bg-orange-600 text-white rounded-xl shadow-xs transition text-2xs uppercase tracking-wide font-bold"
+          >
+            <RotateCcw size={12} />
+            <span>Reactivate</span>
+          </button>
+        </div>
+      )}
+
       {/* Top Header Controls */}
       <div className="flex items-center justify-between border-b border-slate-100 dark:border-slate-850 pb-4">
         <button
@@ -122,8 +260,8 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         <div className="flex gap-2">
           {/* Export CSV button */}
           <button
-            onClick={() => exportRegisterToCSV([customer], milkEntries, 2026, 6)}
-            className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-800 focus:outline-none"
+            onClick={() => exportRegisterToCSV([customer], milkEntries, currentYear, currentMonth)}
+            className="p-2 rounded-xl text-slate-500 hover:bg-slate-100 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-880 focus:outline-none"
             title="Export Excel Ledger"
           >
             <Download size={16} />
@@ -192,27 +330,27 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-450 uppercase tracking-widest mb-1">Daily Delivery</span>
+          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Daily Delivery</span>
           <span className="text-sm font-extrabold text-slate-800 dark:text-white">{customer.default_quantity} Litre(s)</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-450 uppercase tracking-widest mb-1">June Litres</span>
+          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">{currentMonthName} Litres</span>
           <span className="text-sm font-extrabold text-slate-800 dark:text-white">{billing.monthlyConsumption.toFixed(1)} L</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-450 uppercase tracking-widest mb-1">June Bill</span>
+          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">{currentMonthName} Bill</span>
           <span className="text-sm font-extrabold text-slate-850 dark:text-white">{formatCurrency(billing.monthlyBill)}</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-450 uppercase tracking-widest mb-1">Total Bill</span>
+          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Total Bill</span>
           <span className="text-sm font-extrabold text-slate-800 dark:text-white">{formatCurrency(billing.totalBilled)}</span>
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-450 uppercase tracking-widest mb-1">Total Paid</span>
+          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Total Paid</span>
           <span className="text-sm font-extrabold text-sky-600">{formatCurrency(billing.totalPaid)}</span>
         </div>
 
@@ -224,8 +362,34 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         </div>
       </div>
 
+      {/* Unpaid Bill Period Summary */}
+      <div className="p-5 rounded-2xl bg-red-50/20 dark:bg-red-950/10 border border-red-100/50 dark:border-red-900/20 space-y-3">
+        <h4 className="text-2xs font-bold text-red-650 dark:text-red-400 uppercase tracking-widest flex items-center gap-1.5">
+          <CalendarDays size={14} />
+          <span>Unpaid Period Ledger Summary</span>
+        </h4>
+        <div className="grid grid-cols-2 gap-4 text-xs">
+          <div>
+            <span className="block text-3xs text-slate-400 uppercase font-semibold">Unpaid From Date</span>
+            <span className="font-bold text-slate-700 dark:text-slate-200">{unpaidInfo.unpaidStartDate}</span>
+          </div>
+          <div>
+            <span className="block text-3xs text-slate-400 uppercase font-semibold">Liters in Unpaid Period</span>
+            <span className="font-bold text-slate-700 dark:text-slate-200">{unpaidInfo.unpaidLiters.toFixed(1)} L</span>
+          </div>
+          <div>
+            <span className="block text-3xs text-slate-400 uppercase font-semibold">Period Milk Amount</span>
+            <span className="font-bold text-slate-700 dark:text-slate-200">{formatCurrency(unpaidInfo.unpaidCost)}</span>
+          </div>
+          <div>
+            <span className="block text-3xs text-red-500 uppercase font-bold">Total Due Balance</span>
+            <span className="font-black text-red-600 dark:text-red-400">{formatCurrency(billing.pendingAmount)}</span>
+          </div>
+        </div>
+      </div>
+
       {/* Interactive Communication Buttons */}
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         <a
           href={cleanPhone ? `tel:${cleanPhone}` : undefined}
           className={`flex items-center justify-center gap-2 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-bold uppercase transition focus:outline-none ${
@@ -240,17 +404,28 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
           href={cleanPhone ? `https://wa.me/${cleanPhone}?text=${getWhatsAppMessage()}` : '#'}
           target="_blank"
           rel="noopener noreferrer"
-          className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold uppercase transition focus:outline-none"
+          className="flex items-center justify-center gap-2 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-bold uppercase transition focus:outline-none"
+        >
+          <MessageSquare size={14} className="text-sky-500" />
+          <span>WhatsApp</span>
+        </a>
+
+        <button
+          onClick={handleSendUnpaidBill}
+          disabled={!cleanPhone}
+          className={`flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold uppercase transition focus:outline-none animate-pulse-subtle ${
+            !cleanPhone ? 'opacity-50 pointer-events-none' : ''
+          }`}
         >
           <MessageSquare size={14} />
-          <span>WhatsApp Bill</span>
-        </a>
+          <span>Send Unpaid Bill</span>
+        </button>
       </div>
 
       {/* Secondary control button */}
       <button
-        onClick={() => printReceipt(customer, milkEntries, payments, 2026, 6)}
-        className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-bold uppercase transition focus:outline-none"
+        onClick={() => printReceipt(customer, milkEntries, payments, currentYear, currentMonth)}
+        className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-slate-200 dark:border-slate-880 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-bold uppercase transition focus:outline-none"
       >
         <PlusCircle size={14} className="text-sky-500" />
         <span>Print PDF Invoice</span>
@@ -306,14 +481,24 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
       </div>
 
       {/* DROP CUSTOMER ACTION BUTTON (AT VERY BOTTOM) */}
-      <div className="pt-4 border-t border-slate-100 dark:border-slate-850">
-        <button
-          onClick={handleDropCustomer}
-          className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold uppercase transition focus:outline-none border border-red-200"
-        >
-          <Trash2 size={14} />
-          <span>Drop Customer (Stop Deliveries)</span>
-        </button>
+      <div className="pt-4 border-t border-slate-100 dark:border-slate-855 flex flex-col sm:flex-row gap-3">
+        {!customer.deactivated_at ? (
+          <button
+            onClick={handleDropCustomer}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-orange-50 hover:bg-orange-100 text-orange-600 text-xs font-bold uppercase transition focus:outline-none border border-orange-200"
+          >
+            <Trash2 size={14} />
+            <span>Drop Customer (Stop Deliveries)</span>
+          </button>
+        ) : (
+          <button
+            onClick={handlePermanentDelete}
+            className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-red-50 hover:bg-red-100 text-red-650 text-xs font-bold uppercase transition focus:outline-none border border-red-200 animate-pulse-subtle"
+          >
+            <Trash2 size={14} />
+            <span>Permanently Delete Account & Dues</span>
+          </button>
+        )}
       </div>
 
       {/* Mark Payment Modal Dialog */}
@@ -334,7 +519,7 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
               initial={{ scale: 0.95, opacity: 0 }}
               animate={{ scale: 1, opacity: 1 }}
               exit={{ scale: 0.95, opacity: 0 }}
-              className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-white dark:bg-slate-950 p-5 shadow-2xl border border-slate-200 dark:border-slate-850 z-10 text-left"
+              className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-white dark:bg-slate-955 p-5 shadow-2xl border border-slate-200 dark:border-slate-850 z-10 text-left"
             >
               <button
                 onClick={() => setShowPaymentModal(false)}
@@ -343,7 +528,7 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
                 <X size={18} />
               </button>
 
-              <h4 className="font-bold text-slate-800 dark:text-white text-base font-display mb-4">
+              <h4 className="font-bold text-slate-850 dark:text-white text-base font-display mb-4">
                 Record Payment
               </h4>
 
@@ -362,34 +547,6 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
                     onChange={(e) => setAmount(e.target.value)}
                     className="w-full px-4.5 py-2.5 rounded-xl border border-slate-250 dark:border-slate-850 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono text-xs font-bold"
                   />
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Payment Date */}
-                  <div>
-                    <label className="block text-3xs font-bold text-slate-400 uppercase tracking-widest mb-1">
-                      Payment Date
-                    </label>
-                    <input
-                      type="date"
-                      value={paymentDate}
-                      onChange={(e) => setPaymentDate(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-250 dark:border-slate-850 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-sans text-2xs"
-                    />
-                  </div>
-
-                  {/* Covered Date */}
-                  <div>
-                    <label className="block text-3xs font-bold text-slate-400 uppercase tracking-widest mb-1">
-                      Paid Till Date
-                    </label>
-                    <input
-                      type="date"
-                      value={paidTillDate}
-                      onChange={(e) => setPaidTillDate(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-250 dark:border-slate-850 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-sans text-2xs"
-                    />
-                  </div>
                 </div>
 
                 {/* Notes */}

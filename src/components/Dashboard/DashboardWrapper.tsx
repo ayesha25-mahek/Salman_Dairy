@@ -5,6 +5,7 @@ import { DashboardOverview } from './DashboardOverview';
 import { MilkRegister } from './MilkRegister';
 import { CustomerManagement } from './CustomerManagement';
 import { AddCustomer } from './AddCustomer';
+import { Settings } from './Settings';
 import { KeyRound, ShieldAlert, ArrowRight, ArrowLeft } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { motion } from 'framer-motion';
@@ -55,11 +56,11 @@ export const DashboardWrapper: React.FC = () => {
           <form onSubmit={handleLoginSubmit} className="space-y-4">
             <div>
               <label className="block text-3xs font-bold text-slate-450 uppercase tracking-widest mb-1.5">
-                Owner Passcode (Tip: mylifemuskan)
+                Owner Passcode
               </label>
               <input
                 type="password"
-                placeholder="e.g. mylifemuskan"
+                placeholder="Enter passcode"
                 value={code}
                 onChange={(e) => setCode(e.target.value)}
                 className="w-full px-4 py-3 rounded-xl border border-slate-250 bg-slate-50 text-slate-800 font-mono focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs text-center tracking-widest font-bold"
@@ -129,6 +130,9 @@ export const DashboardWrapper: React.FC = () => {
           )}
           {activeTab === 'add_customer' && (
             <AddCustomer />
+          )}
+          {activeTab === 'settings' && (
+            <Settings />
           )}
         </div>
       </main>

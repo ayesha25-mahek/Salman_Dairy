@@ -264,7 +264,7 @@ export const dbService = {
           const { data: seeded, error: seedErr } = await supabase
             .from('settings')
             .insert({
-              owner_code: 'SALMAN2026',
+              owner_code: 'uni2026',
               owner_phone: '03001234567',
               owner_whatsapp: '03001234567'
             })

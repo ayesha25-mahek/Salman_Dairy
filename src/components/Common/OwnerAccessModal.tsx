@@ -81,13 +81,13 @@ export const OwnerAccessModal: React.FC<OwnerAccessModalProps> = ({ isOpen, onCl
                   htmlFor="passcode"
                   className="block text-xs font-semibold uppercase tracking-wider text-slate-500 dark:text-slate-400 mb-2"
                 >
-                  Enter Owner Code (Tip: mylifemuskan)
+                  Enter Owner Code
                 </label>
                 <div className="relative">
                   <input
                     type="password"
                     id="passcode"
-                    placeholder="e.g. mylifemuskan"
+                    placeholder="Enter passcode"
                     value={code}
                     onChange={(e) => {
                       setCode(e.target.value);

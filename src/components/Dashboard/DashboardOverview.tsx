@@ -18,38 +18,68 @@ interface DashboardOverviewProps {
 }
 
 export const DashboardOverview: React.FC<DashboardOverviewProps> = ({ setActiveTab }) => {
-  const { customers, milkEntries, payments } = useDb();
+  const { customers, milkEntries, payments, settings } = useDb();
 
   // Get current date in local YYYY-MM-DD
-  const todayStr = '2026-06-24';
+  const getTodayStr = () => {
+    const d = new Date();
+    const year = d.getFullYear();
+    const month = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+  const todayStr = getTodayStr();
   
   const stats = calculateDashboardStats(customers, milkEntries, payments, todayStr);
 
+  const formattedDate = new Date(todayStr).toLocaleDateString('en-PK', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric'
+  });
+
+  // Resolve values (manual overrides from Settings take precedence)
+  const todayLitresVal = settings?.override_today_litres !== undefined && settings?.override_today_litres !== null
+    ? `${settings.override_today_litres} Litres`
+    : `${stats.todayLitresSold} Litres`;
+
+  const monthlyRevenueVal = settings?.override_monthly_revenue !== undefined && settings?.override_monthly_revenue !== null
+    ? formatCurrency(Number(settings.override_monthly_revenue))
+    : formatCurrency(stats.monthlyRevenue);
+
+  const pendingPaymentsVal = settings?.override_pending_payments !== undefined && settings?.override_pending_payments !== null
+    ? formatCurrency(Number(settings.override_pending_payments))
+    : formatCurrency(stats.pendingPayments);
+
+  const collectedPaymentsVal = settings?.override_collected_payments !== undefined && settings?.override_collected_payments !== null
+    ? formatCurrency(Number(settings.override_collected_payments))
+    : formatCurrency(stats.collectedPayments);
+
   const STATS_ITEMS = [
     {
-      title: "Today's Sales",
-      value: formatCurrency(stats.todaySales),
-      subtitle: "June 24 sales valuation",
+      title: "Today's Litres Sold",
+      value: todayLitresVal,
+      subtitle: `${formattedDate} volume`,
       color: "bg-sky-500/10 text-sky-600",
       icon: TrendingUp
     },
     {
       title: "Monthly Revenue",
-      value: formatCurrency(stats.monthlyRevenue),
+      value: monthlyRevenueVal,
       subtitle: "Current Month Total Bill",
       color: "bg-blue-500/10 text-blue-600",
       icon: DollarSign
     },
     {
       title: "Pending Payments",
-      value: formatCurrency(stats.pendingPayments),
+      value: pendingPaymentsVal,
       subtitle: "Outstanding customer dues",
-      color: "bg-red-500/10 text-red-650",
+      color: "bg-red-500/10 text-red-655",
       icon: Clock
     },
     {
       title: "Collected Payments",
-      value: formatCurrency(stats.collectedPayments),
+      value: collectedPaymentsVal,
       subtitle: "Total received cash",
       color: "bg-indigo-500/10 text-indigo-600",
       icon: CircleDollarSign

@@ -10,7 +10,8 @@ CREATE TABLE IF NOT EXISTS public.customers (
     rate_per_liter NUMERIC NOT NULL DEFAULT 80.0,
     default_quantity NUMERIC NOT NULL DEFAULT 1.0,
     delivery_notes TEXT,
-    created_at TIMESTAMPTZ DEFAULT NOW()
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    deactivated_at TIMESTAMPTZ
 );
 
 -- 2. Milk Entries Table (Daily Logs)

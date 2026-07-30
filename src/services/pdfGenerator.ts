@@ -1,3 +1,4 @@
+import { jsPDF } from 'jspdf';
 import { Customer, MilkEntry, Payment } from '../utils/seedData';
 import { calculateCustomerBilling, formatCurrency } from '../utils/calculations';
 
@@ -63,7 +64,8 @@ export const printReceipt = (
   milkEntries: MilkEntry[],
   payments: Payment[],
   year: number,
-  month: number
+  month: number,
+  printViaIframe = false
 ) => {
   const billing = calculateCustomerBilling(customer, milkEntries, payments, year, month);
   const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
@@ -72,10 +74,13 @@ export const printReceipt = (
     .filter(e => e.customer_id === customer.id && e.date.startsWith(`${year}-${String(month).padStart(2, '0')}`))
     .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
 
-  const printWindow = window.open('', '_blank');
-  if (!printWindow) {
-    alert('Please allow popups to generate and print receipts.');
-    return;
+  let printWindow: Window | null = null;
+  if (!printViaIframe) {
+    printWindow = window.open('', '_blank');
+    if (!printWindow) {
+      alert('Please allow popups to generate and print receipts.');
+      return;
+    }
   }
 
   const entriesRowsHtml = customerEntries
@@ -91,7 +96,7 @@ export const printReceipt = (
     )
     .join('');
 
-  printWindow.document.write(`
+  const htmlContent = `
     <html>
       <head>
         <title>Invoice - ${customer.name} (${monthName} ${year})</title>
@@ -277,6 +282,167 @@ export const printReceipt = (
         </script>
       </body>
     </html>
-  `);
-  printWindow.document.close();
+  `;
+
+  if (printViaIframe) {
+    const iframe = document.createElement('iframe');
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    document.body.appendChild(iframe);
+    iframe.contentWindow?.document.open();
+    iframe.contentWindow?.document.write(htmlContent);
+    iframe.contentWindow?.document.close();
+    iframe.contentWindow?.focus();
+    iframe.contentWindow?.print();
+    setTimeout(() => {
+      document.body.removeChild(iframe);
+    }, 1000);
+  } else if (printWindow) {
+    printWindow.document.write(htmlContent);
+    printWindow.document.close();
+  }
+};
+
+/**
+ * Generates a professional unpaid bill PDF using jsPDF and downloads it directly
+ * (no print dialog is shown — file saves straight to the user's device)
+ */
+export const generateAndDownloadUnpaidBillPdf = (
+  customer: Customer,
+  milkEntries: MilkEntry[],
+  payments: Payment[],
+  unpaidStartDate: string,
+  todayStr: string,
+  unpaidLiters: number,
+  unpaidCost: number,
+  pendingAmount: number
+) => {
+  const doc = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageW = 210;
+  const margin = 18;
+  const contentW = pageW - margin * 2;
+  let y = 20;
+
+  // ── Helper functions ──────────────────────────────────────────────
+  const line = (x1: number, y1: number, x2: number, y2: number, color = '#e2e8f0') => {
+    doc.setDrawColor(color);
+    doc.line(x1, y1, x2, y2);
+  };
+
+  const rect = (x: number, yy: number, w: number, h: number, fillColor: string) => {
+    doc.setFillColor(fillColor);
+    doc.rect(x, yy, w, h, 'F');
+  };
+
+  const text = (str: string, x: number, yy: number, opts?: { size?: number; bold?: boolean; color?: string; align?: 'left' | 'center' | 'right' }) => {
+    doc.setFontSize(opts?.size ?? 10);
+    doc.setFont('helvetica', opts?.bold ? 'bold' : 'normal');
+    doc.setTextColor(opts?.color ?? '#334155');
+    doc.text(str, x, yy, { align: opts?.align ?? 'left' });
+  };
+
+  // ── Header bar ────────────────────────────────────────────────────
+  rect(0, 0, pageW, 32, '#0ea5e9');
+  text('SALMAN DAIRY', margin, 13, { size: 18, bold: true, color: '#ffffff' });
+  text('Pure Fresh Milk • Delivered Daily', margin, 20, { size: 9, color: '#bae6fd' });
+  text('UNPAID BILL STATEMENT', pageW - margin, 11, { size: 13, bold: true, color: '#ffffff', align: 'right' });
+  text(`Generated: ${new Date().toLocaleDateString('en-PK', { day: '2-digit', month: 'short', year: 'numeric' })}`, pageW - margin, 18, { size: 8, color: '#e0f2fe', align: 'right' });
+  y = 42;
+
+  // ── Customer info block ───────────────────────────────────────────
+  rect(margin, y, contentW, 28, '#f8fafc');
+  doc.setDrawColor('#e2e8f0');
+  doc.rect(margin, y, contentW, 28, 'S');
+
+  text('CUSTOMER INFORMATION', margin + 5, y + 7, { size: 7, bold: true, color: '#64748b' });
+  text(customer.name, margin + 5, y + 14, { size: 13, bold: true, color: '#0f172a' });
+  text(`Code: ${customer.customer_code}   •   Phone: ${customer.phone || 'N/A'}   •   Rate: Rs. ${customer.rate_per_liter}/L`, margin + 5, y + 21, { size: 8, color: '#475569' });
+  if (customer.address) {
+    text(`Address: ${customer.address}`, margin + 5, y + 26.5, { size: 7.5, color: '#94a3b8' });
+  }
+  y += 36;
+
+  // ── Unpaid period banner ──────────────────────────────────────────
+  rect(margin, y, contentW, 14, '#fff7ed');
+  doc.setDrawColor('#fed7aa');
+  doc.rect(margin, y, contentW, 14, 'S');
+  text('BILLING PERIOD', margin + 5, y + 6, { size: 7, bold: true, color: '#c2410c' });
+  text(`${unpaidStartDate}  →  ${todayStr}`, margin + 5, y + 11.5, { size: 10, bold: true, color: '#ea580c' });
+  y += 22;
+
+  // ── Milk entries table ────────────────────────────────────────────
+  const unpaidEntries = milkEntries
+    .filter(e => e.customer_id === customer.id && e.date >= unpaidStartDate && e.date <= todayStr)
+    .sort((a, b) => a.date.localeCompare(b.date));
+
+  // Table header
+  rect(margin, y, contentW, 9, '#0ea5e9');
+  text('#', margin + 4, y + 6, { size: 8, bold: true, color: '#ffffff' });
+  text('Date', margin + 14, y + 6, { size: 8, bold: true, color: '#ffffff' });
+  text('Quantity (Litres)', margin + 80, y + 6, { size: 8, bold: true, color: '#ffffff' });
+  text('Amount (Rs.)', pageW - margin - 5, y + 6, { size: 8, bold: true, color: '#ffffff', align: 'right' });
+  y += 9;
+
+  // Table rows
+  unpaidEntries.forEach((entry, idx) => {
+    const rowH = 8;
+    if (idx % 2 === 0) rect(margin, y, contentW, rowH, '#f8fafc');
+    text(`${idx + 1}`, margin + 4, y + 5.5, { size: 8 });
+    text(
+      new Date(entry.date + 'T00:00:00').toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' }),
+      margin + 14, y + 5.5, { size: 8 }
+    );
+    text(`${Number(entry.quantity).toFixed(1)} L`, margin + 80, y + 5.5, { size: 8 });
+    text(formatCurrency(Number(entry.quantity) * customer.rate_per_liter), pageW - margin - 5, y + 5.5, { size: 8, align: 'right' });
+    line(margin, y + rowH, margin + contentW, y + rowH);
+    y += rowH;
+
+    // Page break guard
+    if (y > 260) {
+      doc.addPage();
+      y = 20;
+    }
+  });
+
+  if (unpaidEntries.length === 0) {
+    text('No milk deliveries recorded for this period.', margin + contentW / 2, y + 7, { size: 9, color: '#94a3b8', align: 'center' });
+    y += 14;
+  }
+
+  y += 6;
+
+  // ── Summary box ───────────────────────────────────────────────────
+  const summaryX = pageW - margin - 80;
+  rect(summaryX, y, 80, 36, '#f8fafc');
+  doc.setDrawColor('#e2e8f0');
+  doc.rect(summaryX, y, 80, 36, 'S');
+
+  text('Total Litres Delivered:', summaryX + 4, y + 8, { size: 8, color: '#64748b' });
+  text(`${unpaidLiters.toFixed(1)} L`, summaryX + 76, y + 8, { size: 8, bold: true, align: 'right' });
+
+  text('Period Milk Amount:', summaryX + 4, y + 16, { size: 8, color: '#64748b' });
+  text(formatCurrency(unpaidCost), summaryX + 76, y + 16, { size: 8, bold: true, align: 'right' });
+
+  line(summaryX + 4, y + 20, summaryX + 76, y + 20, '#e2e8f0');
+
+  rect(summaryX, y + 21, 80, 15, '#fee2e2');
+  text('TOTAL DUES OUTSTANDING:', summaryX + 4, y + 29, { size: 8, bold: true, color: '#dc2626' });
+  text(formatCurrency(pendingAmount), summaryX + 76, y + 29, { size: 10, bold: true, color: '#dc2626', align: 'right' });
+
+  y += 50;
+
+  // ── Footer ────────────────────────────────────────────────────────
+  line(margin, y, pageW - margin, y, '#e2e8f0');
+  y += 6;
+  text('Please clear your outstanding dues at the earliest. For any queries, contact Salman Dairy.', pageW / 2, y, { size: 7.5, color: '#94a3b8', align: 'center' });
+  y += 5;
+  text('This bill is system-generated by Salman Dairy Management System.', pageW / 2, y, { size: 7, color: '#cbd5e1', align: 'center' });
+
+  // ── Save ──────────────────────────────────────────────────────────
+  const safeDate = todayStr.replace(/-/g, '');
+  doc.save(`SalmanDairy_UnpaidBill_${customer.customer_code}_${safeDate}.pdf`);
 };

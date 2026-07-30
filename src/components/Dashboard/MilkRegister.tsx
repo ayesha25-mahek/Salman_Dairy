@@ -7,8 +7,8 @@ import { Calendar, Search, Save, CheckCircle, AlertCircle, RefreshCw } from 'luc
 export const MilkRegister: React.FC = () => {
   const { customers, milkEntries, saveMilkEntriesBatch, loading } = useDb();
   
-  const [selectedYear, setSelectedYear] = useState(2026);
-  const [selectedMonth, setSelectedMonth] = useState(6); // June
+  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
+  const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
   const [searchTerm, setSearchTerm] = useState('');
   const [savingState, setSavingState] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   
@@ -53,11 +53,33 @@ export const MilkRegister: React.FC = () => {
 
   // Filtered Customers
   const filteredCustomers = useMemo(() => {
-    return customers.filter(c => 
-      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      c.customer_code.toLowerCase().includes(searchTerm.toLowerCase())
-    );
-  }, [customers, searchTerm]);
+    const selectedYearMonth = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    
+    return customers.filter(c => {
+      // 1. Search Filter
+      const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                            c.customer_code.toLowerCase().includes(searchTerm.toLowerCase());
+      if (!matchesSearch) return false;
+
+      // 2. Creation date filter: customer must have been created in or before the selected month
+      const createdDate = c.created_at ? c.created_at.split('T')[0] : '';
+      const createdYearMonth = createdDate ? createdDate.substring(0, 7) : '';
+      if (createdYearMonth && createdYearMonth > selectedYearMonth) {
+        return false;
+      }
+
+      // 3. Deactivation date filter: if deactivated, they are removed from the NEXT month onwards
+      if (c.deactivated_at) {
+        const deactivatedDate = c.deactivated_at.split('T')[0];
+        const deactivatedYearMonth = deactivatedDate.substring(0, 7);
+        if (deactivatedYearMonth < selectedYearMonth) {
+          return false;
+        }
+      }
+
+      return true;
+    });
+  }, [customers, searchTerm, selectedYear, selectedMonth]);
 
   // Generate date strings for header
   const monthDays = useMemo(() => {
@@ -76,6 +98,19 @@ export const MilkRegister: React.FC = () => {
       return '';
     }
 
+    const customer = customers.find(c => c.id === customerId);
+    const createdAtDate = customer?.created_at ? customer.created_at.split('T')[0] : '';
+    if (createdAtDate && date < createdAtDate) {
+      return '';
+    }
+
+    if (customer?.deactivated_at) {
+      const deactivatedDate = customer.deactivated_at.split('T')[0];
+      if (date > deactivatedDate) {
+        return '';
+      }
+    }
+
     const key = `${customerId}:${date}`;
     
     // If there is an explicit grid value for this cell, display it
@@ -90,6 +125,17 @@ export const MilkRegister: React.FC = () => {
     for (let d = day - 1; d >= 1; d--) {
       const prevDateStr = `${year}-${month}-${String(d).padStart(2, '0')}`;
       const prevKey = `${customerId}:${prevDateStr}`;
+      
+      // Also respect creation date and deactivation date for the carry-forward source cell
+      if (createdAtDate && prevDateStr < createdAtDate) {
+        continue;
+      }
+      if (customer?.deactivated_at) {
+        const deactivatedDate = customer.deactivated_at.split('T')[0];
+        if (prevDateStr > deactivatedDate) {
+          continue;
+        }
+      }
       
       if (gridValues[prevKey] !== undefined && gridValues[prevKey] !== '') {
         return gridValues[prevKey];
@@ -122,8 +168,29 @@ export const MilkRegister: React.FC = () => {
     
     try {
       const entriesToSave: MilkEntry[] = [];
+      const selectedYearMonth = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
-      customers.forEach(customer => {
+      // Filter customers to only save entries for those active in the selected month
+      const activeCustomersInMonth = customers.filter(c => {
+        const createdDate = c.created_at ? c.created_at.split('T')[0] : '';
+        const createdYearMonth = createdDate ? createdDate.substring(0, 7) : '';
+        if (createdYearMonth && createdYearMonth > selectedYearMonth) {
+          return false;
+        }
+        if (c.deactivated_at) {
+          const deactivatedDate = c.deactivated_at.split('T')[0];
+          const deactivatedYearMonth = deactivatedDate.substring(0, 7);
+          if (deactivatedYearMonth < selectedYearMonth) {
+            return false;
+          }
+        }
+        return true;
+      });
+
+      activeCustomersInMonth.forEach(customer => {
+        const createdAtDate = customer.created_at ? customer.created_at.split('T')[0] : '';
+        const deactivatedDate = customer.deactivated_at ? customer.deactivated_at.split('T')[0] : '';
+
         // Loop through all days to gather explicit database entries
         for (let d = 1; d <= daysCount; d++) {
           const dateStr = `${monthString}-${String(d).padStart(2, '0')}`;
@@ -132,10 +199,17 @@ export const MilkRegister: React.FC = () => {
           if (isFutureDate(dateStr)) {
             continue;
           }
+
+          // DO NOT save dates before creation
+          if (createdAtDate && dateStr < createdAtDate) {
+            continue;
+          }
+
+          // DO NOT save dates after deactivation
+          if (deactivatedDate && dateStr > deactivatedDate) {
+            continue;
+          }
           
-          const cellKey = `${customer.id}:${dateStr}`;
-          
-          // Get the display value (this contains the carry-forward logic)
           const displayQtyStr = getDisplayValue(customer.id, dateStr, customer.default_quantity);
           const qtyToSave = displayQtyStr !== '' ? Number(displayQtyStr) : customer.default_quantity;
 
