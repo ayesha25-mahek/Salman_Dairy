@@ -1,7 +1,6 @@
--- Salman Dairy Database Schema (Complete + Correct)
--- Run this in Supabase SQL Editor if starting fresh
+-- RUN THIS ENTIRE SCRIPT IN SUPABASE SQL EDITOR
 
--- 1. Customers Table
+-- Create tables
 CREATE TABLE IF NOT EXISTS public.customers (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_code TEXT UNIQUE NOT NULL,
@@ -15,7 +14,6 @@ CREATE TABLE IF NOT EXISTS public.customers (
     deactivated_at TIMESTAMPTZ
 );
 
--- 2. Milk Entries Table (Daily Logs)
 CREATE TABLE IF NOT EXISTS public.milk_entries (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id UUID REFERENCES public.customers(id) ON DELETE CASCADE,
@@ -25,7 +23,6 @@ CREATE TABLE IF NOT EXISTS public.milk_entries (
     UNIQUE(customer_id, date)
 );
 
--- 3. Payments Table
 CREATE TABLE IF NOT EXISTS public.payments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     customer_id UUID REFERENCES public.customers(id) ON DELETE CASCADE,
@@ -36,7 +33,6 @@ CREATE TABLE IF NOT EXISTS public.payments (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 4. Gallery Table
 CREATE TABLE IF NOT EXISTS public.gallery (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     image_url TEXT NOT NULL,
@@ -44,7 +40,6 @@ CREATE TABLE IF NOT EXISTS public.gallery (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- 5. Settings Table (with override columns)
 CREATE TABLE IF NOT EXISTS public.settings (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     owner_code TEXT NOT NULL DEFAULT 'uni2026',
@@ -57,7 +52,14 @@ CREATE TABLE IF NOT EXISTS public.settings (
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Seed Initial Default Settings if not exists
+-- Disable RLS so everything just works
+ALTER TABLE public.customers DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.milk_entries DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.payments DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.gallery DISABLE ROW LEVEL SECURITY;
+ALTER TABLE public.settings DISABLE ROW LEVEL SECURITY;
+
+-- Seed default settings
 INSERT INTO public.settings (owner_code, owner_phone, owner_whatsapp)
 VALUES ('uni2026', '03001234567', '03001234567')
 ON CONFLICT DO NOTHING;

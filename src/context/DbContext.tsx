@@ -1,5 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
-import { dbService, isLocalMode } from '../services/db';
+import { dbService, isLocalMode, testSupabaseConnection } from '../services/db';
 import { Customer, MilkEntry, Payment, GalleryItem, Settings } from '../utils/seedData';
 
 interface DbContextType {
@@ -10,6 +10,7 @@ interface DbContextType {
   settings: Settings | null;
   loading: boolean;
   isLocalDb: boolean;
+  supabaseConnected: boolean;
   ownerAuthenticated: boolean;
   loginError: string | null;
   
@@ -54,6 +55,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   
   const [loading, setLoading] = useState<boolean>(true);
   const [isLocalDb, setIsLocalDb] = useState<boolean>(false);
+  const [supabaseConnected, setSupabaseConnected] = useState<boolean>(false);
   const [ownerAuthenticated, setOwnerAuthenticated] = useState<boolean>(false);
   const [loginError, setLoginError] = useState<string | null>(null);
 
@@ -81,7 +83,9 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
       setPayments(payData);
       setGallery(galData);
       setSettings(settsData);
-      setIsLocalDb(isLocalMode());
+      const localNow = isLocalMode();
+      setIsLocalDb(localNow);
+      setSupabaseConnected(!localNow);
     } catch (err) {
       console.error('Error fetching data from database service:', err);
     } finally {
@@ -90,7 +94,12 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
   };
 
   useEffect(() => {
-    refreshData();
+    // Test Supabase first, then load data
+    testSupabaseConnection().then((ok) => {
+      setSupabaseConnected(ok);
+      setIsLocalDb(!ok);
+      refreshData();
+    });
   }, []);
 
   // Authentication
@@ -313,6 +322,7 @@ export const DbProvider: React.FC<{ children: React.ReactNode }> = ({ children }
         settings,
         loading,
         isLocalDb,
+        supabaseConnected,
         ownerAuthenticated,
         loginError,
         authenticateOwner,

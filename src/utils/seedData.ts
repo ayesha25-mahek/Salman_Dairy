@@ -50,7 +50,7 @@ export interface Settings {
 
 export const defaultSettings: Settings = {
   id: 'settings-1',
-  owner_code: '',
+  owner_code: 'uni2026',
   owner_phone: '9010256658',
   owner_whatsapp: '9010256658',
   override_today_litres: null,

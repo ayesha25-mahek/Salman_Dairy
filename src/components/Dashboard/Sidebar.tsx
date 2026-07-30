@@ -8,7 +8,9 @@ import {
   Menu, 
   X, 
   LogOut,
-  Settings as SettingsIcon
+  Settings as SettingsIcon,
+  Cloud,
+  CloudOff
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { useDb } from '../../context/DbContext';
@@ -23,7 +25,7 @@ interface SidebarProps {
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpen, setIsOpen }) => {
-  const { logoutOwner } = useDb();
+  const { logoutOwner, supabaseConnected } = useDb();
 
   const MENU_ITEMS = [
     { id: 'dashboard', name: 'Dashboard', icon: LayoutDashboard },
@@ -114,6 +116,31 @@ export const Sidebar: React.FC<SidebarProps> = ({ activeTab, setActiveTab, isOpe
 
         {/* Sidebar Footer Actions */}
         <div className="p-4 border-t border-slate-100 bg-white space-y-1 text-left">
+
+          {/* DB Connection Status */}
+          <div className={`flex items-center gap-2 px-3 py-2 rounded-xl mb-2 ${
+            supabaseConnected
+              ? 'bg-green-50 border border-green-100'
+              : 'bg-amber-50 border border-amber-100'
+          }`}>
+            {supabaseConnected
+              ? <Cloud size={13} className="text-green-500 flex-shrink-0" />
+              : <CloudOff size={13} className="text-amber-500 flex-shrink-0" />
+            }
+            <div>
+              <p className={`text-3xs font-black uppercase tracking-widest ${
+                supabaseConnected ? 'text-green-600' : 'text-amber-600'
+              }`}>
+                {supabaseConnected ? 'Cloud DB Connected' : 'Local Mode Only'}
+              </p>
+              {!supabaseConnected && (
+                <p className="text-[9px] text-amber-500 font-semibold mt-0.5">
+                  Data won't persist across logins!
+                </p>
+              )}
+            </div>
+          </div>
+
           {/* Back to Website */}
           <Link
             to="/"
