@@ -168,7 +168,7 @@ export const AddCustomer: React.FC = () => {
               <div className="relative">
                 <input
                   type="number"
-                  step="0.5"
+                  step="any"
                   min="0"
                   value={defaultQuantity}
                   onChange={(e) => setDefaultQuantity(e.target.value)}

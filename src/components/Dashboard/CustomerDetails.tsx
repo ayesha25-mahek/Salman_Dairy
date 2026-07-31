@@ -916,7 +916,7 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
                     </label>
                     <input
                       type="number"
-                      step="0.5"
+                      step="any"
                       min="0"
                       required
                       value={editQuantity}
