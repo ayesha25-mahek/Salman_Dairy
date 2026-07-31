@@ -15,7 +15,9 @@ import {
   Check, 
   AlertCircle,
   CalendarDays,
-  RotateCcw
+  RotateCcw,
+  Edit2,
+  Save
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -32,11 +34,28 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
     deletePayment, 
     deleteCustomer, 
     deactivateCustomer, 
-    reactivateCustomer 
+    reactivateCustomer,
+    updateCustomer
   } = useDb();
   
   const [showPaymentModal, setShowPaymentModal] = useState(false);
-  
+
+  // ── Add Phone Modal (for call/whatsapp when phone is missing) ──
+  const [showAddPhoneModal, setShowAddPhoneModal] = useState(false);
+  const [pendingAction, setPendingAction] = useState<'call' | 'whatsapp_bill' | 'whatsapp_unpaid' | null>(null);
+  const [newPhoneInput, setNewPhoneInput] = useState('');
+  const [addPhoneStatus, setAddPhoneStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+
+  // ── Edit Customer Modal ──
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editPhone, setEditPhone] = useState('');
+  const [editAddress, setEditAddress] = useState('');
+  const [editRate, setEditRate] = useState('');
+  const [editQuantity, setEditQuantity] = useState('');
+  const [editDeliveryNotes, setEditDeliveryNotes] = useState('');
+  const [editStatus, setEditStatus] = useState<'idle' | 'saving' | 'success' | 'error'>('idle');
+
   // Payment Form State
   const [amount, setAmount] = useState('');
   const [notes, setNotes] = useState('');
@@ -120,6 +139,102 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
       `💰 Due Amount: *${formatCurrency(billing.pendingAmount)}*\n\n` +
       `Kindly clear your dues. Shukriya! 🙏`;
     return encodeURIComponent(msg);
+  };
+
+  // ── Handle actions that need a phone number ──
+  const handleActionRequiringPhone = (action: 'call' | 'whatsapp_bill' | 'whatsapp_unpaid') => {
+    if (cleanPhone) {
+      // Phone exists — act immediately
+      executePhoneAction(action, cleanPhone);
+    } else {
+      // No phone — prompt to add
+      setPendingAction(action);
+      setNewPhoneInput('');
+      setAddPhoneStatus('idle');
+      setShowAddPhoneModal(true);
+    }
+  };
+
+  const executePhoneAction = (action: 'call' | 'whatsapp_bill' | 'whatsapp_unpaid', phone: string) => {
+    if (action === 'call') {
+      window.location.href = `tel:${phone}`;
+    } else if (action === 'whatsapp_bill') {
+      window.open(`https://wa.me/${phone}?text=${getWhatsAppMessage()}`, '_blank');
+    } else if (action === 'whatsapp_unpaid') {
+      window.open(`https://wa.me/${phone}?text=${getWhatsAppUnpaidMessage()}`, '_blank');
+    }
+  };
+
+  const handleSaveAndCall = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const trimmedPhone = newPhoneInput.trim();
+    if (!trimmedPhone) return;
+
+    setAddPhoneStatus('saving');
+    try {
+      const updated = { ...customer, phone: trimmedPhone };
+      const res = await updateCustomer(updated);
+      if (res) {
+        setAddPhoneStatus('success');
+        const cleanNew = trimmedPhone.replace(/[^0-9]/g, '');
+        setTimeout(() => {
+          setShowAddPhoneModal(false);
+          setAddPhoneStatus('idle');
+          if (pendingAction) {
+            executePhoneAction(pendingAction, cleanNew);
+          }
+          setPendingAction(null);
+        }, 1000);
+      } else {
+        setAddPhoneStatus('error');
+      }
+    } catch (err) {
+      console.error(err);
+      setAddPhoneStatus('error');
+    }
+  };
+
+  // ── Edit Customer ──
+  const openEditModal = () => {
+    setEditName(customer.name);
+    setEditPhone(customer.phone || '');
+    setEditAddress(customer.address || '');
+    setEditRate(String(customer.rate_per_liter));
+    setEditQuantity(String(customer.default_quantity));
+    setEditDeliveryNotes(customer.delivery_notes || '');
+    setEditStatus('idle');
+    setShowEditModal(true);
+  };
+
+  const handleEditSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editName.trim()) return;
+
+    setEditStatus('saving');
+    try {
+      const updated: Customer = {
+        ...customer,
+        name: editName.trim(),
+        phone: editPhone.trim(),
+        address: editAddress.trim(),
+        rate_per_liter: Number(editRate),
+        default_quantity: Number(editQuantity),
+        delivery_notes: editDeliveryNotes.trim()
+      };
+      const res = await updateCustomer(updated);
+      if (res) {
+        setEditStatus('success');
+        setTimeout(() => {
+          setEditStatus('idle');
+          setShowEditModal(false);
+        }, 1500);
+      } else {
+        setEditStatus('error');
+      }
+    } catch (err) {
+      console.error(err);
+      setEditStatus('error');
+    }
   };
 
   const handleMarkPayment = async (e: React.FormEvent) => {
@@ -219,14 +334,6 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
     day: 'numeric'
   });
 
-  const handleSendUnpaidBill = () => {
-    // Send the bill details directly via WhatsApp
-    if (cleanPhone) {
-      const url = `https://wa.me/${cleanPhone}?text=${getWhatsAppUnpaidMessage()}`;
-      window.open(url, '_blank');
-    }
-  };
-
   return (
     <div className="bg-white dark:bg-slate-950 border border-slate-200 dark:border-slate-850 rounded-3xl p-6 shadow-sm space-y-6 text-left">
       
@@ -258,6 +365,16 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         </button>
 
         <div className="flex gap-2">
+          {/* Edit Customer button */}
+          <button
+            onClick={openEditModal}
+            className="flex items-center gap-1.5 px-3 py-2 rounded-xl text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-900 border border-slate-200 dark:border-slate-880 focus:outline-none text-xs font-bold uppercase tracking-wide transition"
+            title="Edit Customer Details"
+          >
+            <Edit2 size={14} />
+            <span className="hidden sm:inline">Edit</span>
+          </button>
+
           {/* Export CSV button */}
           <button
             onClick={() => exportRegisterToCSV([customer], milkEntries, currentYear, currentMonth)}
@@ -294,6 +411,21 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
                 <CalendarDays size={12} className="text-sky-500" />
                 From: {formattedStartDate}
               </span>
+              {/* Phone badge — shows "No phone" if missing */}
+              {cleanPhone ? (
+                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-green-100 dark:bg-green-900/40 text-green-700 dark:text-green-400 text-2xs font-semibold">
+                  <Phone size={11} />
+                  {customer.phone}
+                </span>
+              ) : (
+                <button
+                  onClick={() => handleActionRequiringPhone('call')}
+                  className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-md bg-orange-100 dark:bg-orange-900/40 text-orange-600 dark:text-orange-400 text-2xs font-semibold border border-orange-200 dark:border-orange-800 hover:bg-orange-200 transition"
+                >
+                  <Phone size={11} />
+                  No phone — tap to add
+                </button>
+              )}
             </div>
           </div>
           
@@ -390,32 +522,28 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
 
       {/* Interactive Communication Buttons */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-        <a
-          href={cleanPhone ? `tel:${cleanPhone}` : undefined}
-          className={`flex items-center justify-center gap-2 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-bold uppercase transition focus:outline-none ${
-            !cleanPhone ? 'opacity-50 pointer-events-none' : ''
-          }`}
+        {/* Call */}
+        <button
+          onClick={() => handleActionRequiringPhone('call')}
+          className="flex items-center justify-center gap-2 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-bold uppercase transition focus:outline-none"
         >
           <Phone size={14} className="text-sky-500" />
           <span>Call Customer</span>
-        </a>
+        </button>
 
-        <a
-          href={cleanPhone ? `https://wa.me/${cleanPhone}?text=${getWhatsAppMessage()}` : '#'}
-          target="_blank"
-          rel="noopener noreferrer"
+        {/* WhatsApp monthly bill */}
+        <button
+          onClick={() => handleActionRequiringPhone('whatsapp_bill')}
           className="flex items-center justify-center gap-2 py-3 rounded-2xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-bold uppercase transition focus:outline-none"
         >
           <MessageSquare size={14} className="text-sky-500" />
           <span>WhatsApp</span>
-        </a>
+        </button>
 
+        {/* WhatsApp unpaid bill */}
         <button
-          onClick={handleSendUnpaidBill}
-          disabled={!cleanPhone}
-          className={`flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold uppercase transition focus:outline-none animate-pulse-subtle ${
-            !cleanPhone ? 'opacity-50 pointer-events-none' : ''
-          }`}
+          onClick={() => handleActionRequiringPhone('whatsapp_unpaid')}
+          className="flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-500 hover:bg-sky-600 text-white text-xs font-bold uppercase transition focus:outline-none animate-pulse-subtle"
         >
           <MessageSquare size={14} />
           <span>Send Unpaid Bill</span>
@@ -501,7 +629,9 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         )}
       </div>
 
-      {/* Mark Payment Modal Dialog */}
+      {/* ════════════════════════════════════════ */}
+      {/* Mark Payment Modal Dialog               */}
+      {/* ════════════════════════════════════════ */}
       <AnimatePresence>
         {showPaymentModal && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
@@ -583,6 +713,254 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
                   className="w-full py-3 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-xl shadow-lg hover:shadow-sky-500/10 active:scale-98 transition-all text-xs uppercase tracking-wide disabled:opacity-50"
                 >
                   {modalStatus === 'saving' ? 'Recording...' : 'Record Payment'}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ════════════════════════════════════════ */}
+      {/* Add Phone Number Modal                  */}
+      {/* (shown when calling/messaging without   */}
+      {/*  a saved phone number)                  */}
+      {/* ════════════════════════════════════════ */}
+      <AnimatePresence>
+        {showAddPhoneModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => { setShowAddPhoneModal(false); setPendingAction(null); }}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-sm overflow-hidden rounded-2xl bg-white dark:bg-slate-955 p-5 shadow-2xl border border-slate-200 dark:border-slate-850 z-10 text-left"
+            >
+              <button
+                onClick={() => { setShowAddPhoneModal(false); setPendingAction(null); }}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-650 dark:hover:text-slate-250"
+              >
+                <X size={18} />
+              </button>
+
+              {/* Icon + heading */}
+              <div className="flex items-center gap-3 mb-4">
+                <div className="p-2.5 rounded-xl bg-orange-100 dark:bg-orange-900/30 text-orange-500">
+                  <Phone size={20} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-850 dark:text-white text-base font-display leading-tight">
+                    Phone Number Missing
+                  </h4>
+                  <p className="text-2xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Please add a phone number for <span className="font-bold text-slate-700 dark:text-slate-200">{customer.name}</span> to continue.
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleSaveAndCall} className="space-y-4">
+                <div>
+                  <label className="block text-3xs font-bold text-slate-400 uppercase tracking-widest mb-1">
+                    Phone Number *
+                  </label>
+                  <input
+                    type="tel"
+                    required
+                    autoFocus
+                    placeholder="e.g. 03001234567"
+                    value={newPhoneInput}
+                    onChange={(e) => { setNewPhoneInput(e.target.value); setAddPhoneStatus('idle'); }}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-250 dark:border-slate-850 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-orange-400 font-mono text-sm font-bold"
+                  />
+                  <p className="text-3xs text-slate-400 mt-1.5">
+                    This will be saved to the customer's profile.
+                  </p>
+                </div>
+
+                {addPhoneStatus === 'success' && (
+                  <div className="flex items-center gap-1.5 p-3 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-500 text-xs font-semibold">
+                    <Check size={16} />
+                    <span>Phone saved! Proceeding…</span>
+                  </div>
+                )}
+
+                {addPhoneStatus === 'error' && (
+                  <div className="flex items-center gap-1.5 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold">
+                    <AlertCircle size={16} />
+                    <span>Failed to save. Try again.</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={addPhoneStatus === 'saving' || addPhoneStatus === 'success'}
+                  className="w-full py-3 bg-orange-500 hover:bg-orange-600 text-white font-bold rounded-xl shadow-lg active:scale-98 transition-all text-xs uppercase tracking-wide disabled:opacity-50"
+                >
+                  {addPhoneStatus === 'saving' ? 'Saving…' : 'Save & Continue'}
+                </button>
+              </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ════════════════════════════════════════ */}
+      {/* Edit Customer Modal                     */}
+      {/* ════════════════════════════════════════ */}
+      <AnimatePresence>
+        {showEditModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowEditModal(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-md overflow-hidden rounded-2xl bg-white dark:bg-slate-955 p-6 shadow-2xl border border-slate-200 dark:border-slate-850 z-10 text-left max-h-[90vh] overflow-y-auto"
+            >
+              <button
+                onClick={() => setShowEditModal(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-650 dark:hover:text-slate-250"
+              >
+                <X size={18} />
+              </button>
+
+              {/* Heading */}
+              <div className="flex items-center gap-3 mb-5">
+                <div className="p-2.5 rounded-xl bg-sky-100 dark:bg-sky-900/30 text-sky-500">
+                  <Edit2 size={18} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-850 dark:text-white text-base font-display leading-tight">
+                    Edit Customer Details
+                  </h4>
+                  <p className="text-2xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Code: <span className="font-mono font-bold text-sky-500">{customer.customer_code}</span>
+                  </p>
+                </div>
+              </div>
+
+              <form onSubmit={handleEditSubmit} className="space-y-4">
+                {/* Name */}
+                <div>
+                  <label className="block text-2xs font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Customer Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={editName}
+                    onChange={(e) => setEditName(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-850 bg-slate-50 dark:bg-slate-900 text-slate-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs"
+                  />
+                </div>
+
+                {/* Phone */}
+                <div>
+                  <label className="block text-2xs font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Phone Number
+                  </label>
+                  <input
+                    type="tel"
+                    placeholder="e.g. 03001234567"
+                    value={editPhone}
+                    onChange={(e) => setEditPhone(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-850 bg-slate-50 dark:bg-slate-900 text-slate-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs font-mono"
+                  />
+                </div>
+
+                {/* Address */}
+                <div>
+                  <label className="block text-2xs font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Delivery Address
+                  </label>
+                  <input
+                    type="text"
+                    placeholder="e.g. House 12, Shadnagar"
+                    value={editAddress}
+                    onChange={(e) => setEditAddress(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-850 bg-slate-50 dark:bg-slate-900 text-slate-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs"
+                  />
+                </div>
+
+                {/* Rate & Quantity */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-2xs font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                      Rate / Litre (Rs)
+                    </label>
+                    <input
+                      type="number"
+                      min="0"
+                      required
+                      value={editRate}
+                      onChange={(e) => setEditRate(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-850 bg-slate-50 dark:bg-slate-900 text-slate-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-2xs font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                      Daily Qty (L)
+                    </label>
+                    <input
+                      type="number"
+                      step="0.5"
+                      min="0"
+                      required
+                      value={editQuantity}
+                      onChange={(e) => setEditQuantity(e.target.value)}
+                      className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-850 bg-slate-50 dark:bg-slate-900 text-slate-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs"
+                    />
+                  </div>
+                </div>
+
+                {/* Delivery Notes */}
+                <div>
+                  <label className="block text-2xs font-bold text-slate-450 dark:text-slate-400 uppercase tracking-wider mb-1.5">
+                    Delivery Notes / Instructions
+                  </label>
+                  <textarea
+                    rows={2}
+                    placeholder="e.g. Deliver before 7am, leave at doorstep"
+                    value={editDeliveryNotes}
+                    onChange={(e) => setEditDeliveryNotes(e.target.value)}
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-850 bg-slate-50 dark:bg-slate-900 text-slate-850 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 text-xs resize-none"
+                  />
+                </div>
+
+                {editStatus === 'success' && (
+                  <div className="flex items-center gap-1.5 p-3 rounded-lg bg-sky-500/10 border border-sky-500/20 text-sky-500 text-xs font-semibold">
+                    <Check size={16} />
+                    <span>Customer updated successfully!</span>
+                  </div>
+                )}
+
+                {editStatus === 'error' && (
+                  <div className="flex items-center gap-1.5 p-3 rounded-lg bg-red-500/10 border border-red-500/20 text-red-500 text-xs font-semibold">
+                    <AlertCircle size={16} />
+                    <span>Failed to update. Please try again.</span>
+                  </div>
+                )}
+
+                <button
+                  type="submit"
+                  disabled={editStatus === 'saving'}
+                  className="w-full flex items-center justify-center gap-2 py-3 bg-sky-500 hover:bg-sky-600 text-white font-bold rounded-xl shadow-lg hover:shadow-sky-500/10 active:scale-98 transition-all text-xs uppercase tracking-wide disabled:opacity-50"
+                >
+                  <Save size={14} />
+                  {editStatus === 'saving' ? 'Saving…' : 'Save Changes'}
                 </button>
               </form>
             </motion.div>
