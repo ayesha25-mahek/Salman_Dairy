@@ -12,10 +12,18 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ setActiv
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
-  const filteredCustomers = customers.filter(c =>
-    c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    c.customer_code.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // Extract trailing number from code like "xxxx01" → 1
+  const getCodeNumber = (code: string): number => {
+    const match = code.match(/(\d+)$/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
+  const filteredCustomers = customers
+    .filter(c =>
+      c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      c.customer_code.toLowerCase().includes(searchTerm.toLowerCase())
+    )
+    .sort((a, b) => getCodeNumber(a.customer_code) - getCodeNumber(b.customer_code));
 
   const selectedCustomer = customers.find(c => c.id === selectedCustomerId);
 

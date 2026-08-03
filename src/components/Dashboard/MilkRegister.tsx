@@ -14,6 +14,8 @@ export const MilkRegister: React.FC = () => {
   
   // State for grid input overrides. Key format: `customer_id:date` -> value
   const [gridValues, setGridValues] = useState<Record<string, string>>({});
+  // Track keys that the user has manually edited (dirty) so DB reloads don't overwrite them
+  const [dirtyKeys, setDirtyKeys] = useState<Set<string>>(new Set());
 
   const daysCount = useMemo(() => {
     return getDaysInMonth(selectedYear, selectedMonth);
@@ -38,6 +40,7 @@ export const MilkRegister: React.FC = () => {
   };
 
   // Load database entries into the local grid state
+  // Merges DB values with any locally-dirty (unsaved) edits so edits survive a DB reload
   useEffect(() => {
     const newGridValues: Record<string, string> = {};
     
@@ -48,14 +51,34 @@ export const MilkRegister: React.FC = () => {
       newGridValues[`${entry.customer_id}:${entry.date}`] = entry.quantity.toString();
     });
 
-    setGridValues(newGridValues);
+    // Preserve any locally-edited (dirty) keys so the user doesn't lose in-progress changes
+    setGridValues(prev => {
+      const merged = { ...newGridValues };
+      dirtyKeys.forEach(key => {
+        if (prev[key] !== undefined) {
+          merged[key] = prev[key];
+        }
+      });
+      return merged;
+    });
   }, [milkEntries, monthString]);
 
-  // Filtered Customers
+  // When the month changes, clear dirty keys (start fresh for new month view)
+  useEffect(() => {
+    setDirtyKeys(new Set());
+  }, [monthString]);
+
+  // Helper: extract trailing number from a customer code like "ABCD01" → 1
+  const getCodeNumber = (code: string): number => {
+    const match = code.match(/(\d+)$/);
+    return match ? parseInt(match[1], 10) : 0;
+  };
+
+  // Filtered & sorted Customers — sorted by the numeric suffix of their customer_code
   const filteredCustomers = useMemo(() => {
     const selectedYearMonth = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
     
-    return customers.filter(c => {
+    const filtered = customers.filter(c => {
       // 1. Search Filter
       const matchesSearch = c.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                             c.customer_code.toLowerCase().includes(searchTerm.toLowerCase());
@@ -79,6 +102,10 @@ export const MilkRegister: React.FC = () => {
 
       return true;
     });
+
+    // Sort by the numeric suffix of customer_code (e.g. xxxx01, xxxx02, ...)
+    filtered.sort((a, b) => getCodeNumber(a.customer_code) - getCodeNumber(b.customer_code));
+    return filtered;
   }, [customers, searchTerm, selectedYear, selectedMonth]);
 
   // Generate date strings for header
@@ -154,6 +181,8 @@ export const MilkRegister: React.FC = () => {
     if (val !== '' && isNaN(Number(val))) return;
     
     const key = `${customerId}:${date}`;
+    // Mark this key as dirty so DB reloads don't wipe the user's edit
+    setDirtyKeys(prev => new Set(prev).add(key));
     setGridValues(prev => ({
       ...prev,
       [key]: val
@@ -226,6 +255,8 @@ export const MilkRegister: React.FC = () => {
       const res = await saveMilkEntriesBatch(entriesToSave);
       if (res) {
         setSavingState('saved');
+        // Clear dirty keys after a successful save — DB now has the latest values
+        setDirtyKeys(new Set());
         setTimeout(() => setSavingState('idle'), 3005);
       } else {
         setSavingState('error');

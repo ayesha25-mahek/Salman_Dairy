@@ -118,7 +118,8 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
 
   // WhatsApp template for entire month bill
   const getWhatsAppMessage = () => {
-    const msg = `Assalam-o-Alaikum ${customer.name},\n\nThis is your monthly bill from *Salman Dairy*:\n` +
+    const msg = `*Salman Dairy — Monthly Bill*\n` +
+      `Customer: *${customer.name}*\n` +
       `• Code: *${customer.customer_code}*\n` +
       `• Total Milk: *${billing.monthlyConsumption.toFixed(1)} Litres*\n` +
       `• Rate: *Rs. ${customer.rate_per_liter}/L*\n` +
@@ -132,12 +133,12 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
   // Short WhatsApp bill message for unpaid period
   const getWhatsAppUnpaidMessage = () => {
     const msg =
-      `Assalam-o-Alaikum *${customer.name}* 🥛\n` +
-      `*Salman Dairy — Unpaid Bill*\n\n` +
+      `*Salman Dairy — Unpaid Bill*\n` +
+      `Customer: *${customer.name}*\n\n` +
       `📅 Period: ${unpaidInfo.unpaidStartDate} → ${todayStr}\n` +
       `🧴 Milk: *${unpaidInfo.unpaidLiters.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
       `💰 Due Amount: *${formatCurrency(billing.pendingAmount)}*\n\n` +
-      `Kindly clear your dues. Shukriya! 🙏`;
+      `Kindly clear your dues. Shukriya!`;
     return encodeURIComponent(msg);
   };
 
