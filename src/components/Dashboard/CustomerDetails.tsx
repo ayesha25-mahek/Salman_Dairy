@@ -118,7 +118,7 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
 
   // WhatsApp template for entire month bill
   const getWhatsAppMessage = () => {
-    const msg = `*Salman Dairy — Monthly Bill*\n` +
+    const msg = `*Salman Khan's Dairy — Monthly Bill*\n` +
       `Customer: *${customer.name}*\n` +
       `• Code: *${customer.customer_code}*\n` +
       `• Total Milk: *${billing.monthlyConsumption.toFixed(1)} Litres*\n` +
@@ -133,7 +133,7 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
   // Short WhatsApp bill message for unpaid period
   const getWhatsAppUnpaidMessage = () => {
     const msg =
-      `*Salman Dairy — Unpaid Bill*\n` +
+      `*Salman Khan's Dairy — Unpaid Bill*\n` +
       `Customer: *${customer.name}*\n\n` +
       `📅 Period: ${unpaidInfo.unpaidStartDate} → ${todayStr}\n` +
       `🧴 Milk: *${unpaidInfo.unpaidLiters.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
