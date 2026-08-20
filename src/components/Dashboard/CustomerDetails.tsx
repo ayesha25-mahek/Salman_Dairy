@@ -126,7 +126,8 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
       `• Current Bill: *${formatCurrency(billing.monthlyBill)}*\n` +
       `-----------------------------\n` +
       `*Total Balance Due: ${formatCurrency(billing.pendingAmount)}*\n\n` +
-      `Kindly clear your outstanding balance. Thank you!`;
+      `Kindly clear your outstanding balance. Thank you!\n\n` +
+      `— *Salman Khan*`;
     return encodeURIComponent(msg);
   };
 
@@ -138,7 +139,8 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
       `📅 Period: ${unpaidInfo.unpaidStartDate} → ${todayStr}\n` +
       `🧴 Milk: *${unpaidInfo.unpaidLiters.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
       `💰 Due Amount: *${formatCurrency(billing.pendingAmount)}*\n\n` +
-      `Kindly clear your dues. Shukriya!`;
+      `Kindly clear your dues. Shukriya!\n\n` +
+      `— *Salman Khan*`;
     return encodeURIComponent(msg);
   };
 

@@ -60,7 +60,7 @@ export const Navbar: React.FC = () => {
           <div className="flex items-center justify-center">
             <Link to="/" className="flex items-center gap-2">
               <span className="text-xl font-extrabold font-display tracking-tight text-slate-800 dark:text-white bg-clip-text">
-                Salman <span className="text-sky-500">Dairy</span>
+                Salman Khan's <span className="text-sky-500">Dairy</span>
               </span>
             </Link>
           </div>

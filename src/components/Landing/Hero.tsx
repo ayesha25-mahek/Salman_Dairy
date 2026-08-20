@@ -72,7 +72,7 @@ export const Hero: React.FC = () => {
           transition={{ duration: 0.6, delay: 0.1 }}
           className="text-4xl sm:text-6xl font-black font-display tracking-tight text-white mb-4"
         >
-          Salman <span className="text-sky-400">Dairy</span>
+          Salman Khan's <span className="text-sky-400">Dairy</span>
         </motion.h1>
 
         {/* Subtitle */}

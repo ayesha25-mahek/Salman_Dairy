@@ -32,7 +32,7 @@ export const LandingPage: React.FC = () => {
           {/* Col 1: Branding and description */}
           <div className="space-y-4 text-left">
             <h3 className="text-lg font-black font-sans text-slate-850">
-              Salman <span className="text-sky-500">Dairy</span>
+              Salman Khan's <span className="text-sky-500">Dairy</span>
             </h3>
             <p className="text-xs text-slate-450 leading-relaxed font-sans max-w-sm">
               Providing organic, pure, and raw farm-fresh milk to families since 2020. Our strict quality and hygiene controls guarantee fresh milk delivered daily to your doorstep.
@@ -77,7 +77,7 @@ export const LandingPage: React.FC = () => {
         {/* Bottom Bar */}
         <div className="max-w-7xl mx-auto border-t border-slate-100 mt-10 pt-6 flex flex-col sm:flex-row items-center justify-between gap-4 text-3xs font-semibold uppercase tracking-wider text-slate-400">
           <span>
-            © {new Date().getFullYear()} Salman Dairy. All Rights Reserved.
+            © {new Date().getFullYear()} Salman Khan's Dairy. All Rights Reserved.
           </span>
           <span className="flex items-center gap-1">
             Made with <Heart size={10} className="text-red-500 animate-pulse" /> for pure health.
