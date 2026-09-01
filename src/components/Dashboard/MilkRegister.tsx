@@ -5,7 +5,7 @@ import { getDaysInMonth } from '../../utils/calculations';
 import { Calendar, Search, Save, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 
 export const MilkRegister: React.FC = () => {
-  const { customers, milkEntries, saveMilkEntriesBatch, loading } = useDb();
+  const { customers, milkEntries, saveMilkEntry, saveMilkEntriesBatch, loading } = useDb();
   
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -176,7 +176,7 @@ export const MilkRegister: React.FC = () => {
   /**
    * Handle cell value change
    */
-  const handleCellChange = (customerId: string, date: string, val: string) => {
+  const handleCellChange = async (customerId: string, date: string, val: string) => {
     // Validate number input or empty string
     if (val !== '' && isNaN(Number(val))) return;
     
@@ -187,6 +187,11 @@ export const MilkRegister: React.FC = () => {
       ...prev,
       [key]: val
     }));
+
+    // Auto-persist valid numeric edits to db so other tabs immediately reflect the new milk quantity
+    if (val !== '') {
+      await saveMilkEntry(customerId, date, Number(val));
+    }
   };
 
   /**

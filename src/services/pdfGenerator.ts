@@ -1,6 +1,6 @@
 import { jsPDF } from 'jspdf';
 import { Customer, MilkEntry, Payment } from '../utils/seedData';
-import { calculateCustomerBilling, formatCurrency } from '../utils/calculations';
+import { calculateCustomerBilling, getCustomerDailyDeliveries, calculateCustomerUnpaidPeriod, formatCurrency } from '../utils/calculations';
 
 /**
  * Exports the monthly milk register for all customers to a CSV file
@@ -13,6 +13,8 @@ export const exportRegisterToCSV = (
 ) => {
   const daysInMonth = new Date(year, month, 0).getDate();
   const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
+  const monthString = `${year}-${String(month).padStart(2, '0')}`;
+  const lastDayOfMonthStr = `${monthString}-${String(daysInMonth).padStart(2, '0')}`;
   
   // Headers
   let csvContent = `Salman Dairy Milk Register - ${monthName} ${year}\n`;
@@ -24,17 +26,20 @@ export const exportRegisterToCSV = (
 
   // Rows
   customers.forEach(customer => {
-    const custEntries = milkEntries.filter(
-      e => e.customer_id === customer.id && e.date.startsWith(`${year}-${String(month).padStart(2, '0')}`)
-    );
+    const deliveries = getCustomerDailyDeliveries(customer, milkEntries, lastDayOfMonthStr);
+    const deliveryMap = new Map<string, number>();
+    deliveries.forEach(d => {
+      if (d.date.startsWith(monthString)) {
+        deliveryMap.set(d.date, d.quantity);
+      }
+    });
     
     let row = `"${customer.customer_code}","${customer.name}",${customer.rate_per_liter},`;
     let totalLitres = 0;
 
     for (let d = 1; d <= daysInMonth; d++) {
-      const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
-      const entry = custEntries.find(e => e.date === dateStr);
-      const qty = entry ? Number(entry.quantity) : 0;
+      const dateStr = `${monthString}-${String(d).padStart(2, '0')}`;
+      const qty = deliveryMap.get(dateStr) || 0;
       row += `${qty},`;
       totalLitres += qty;
     }
@@ -67,12 +72,15 @@ export const printReceipt = (
   month: number,
   printViaIframe = false
 ) => {
-  const billing = calculateCustomerBilling(customer, milkEntries, payments, year, month);
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const monthString = `${year}-${String(month).padStart(2, '0')}`;
+  const lastDayOfMonthStr = `${monthString}-${String(daysInMonth).padStart(2, '0')}`;
+  const billing = calculateCustomerBilling(customer, milkEntries, payments, year, month, lastDayOfMonthStr);
   const monthName = new Date(year, month - 1).toLocaleString('default', { month: 'long' });
   
-  const customerEntries = milkEntries
-    .filter(e => e.customer_id === customer.id && e.date.startsWith(`${year}-${String(month).padStart(2, '0')}`))
-    .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+  const customerDeliveries = getCustomerDailyDeliveries(customer, milkEntries, lastDayOfMonthStr)
+    .filter(d => d.date.startsWith(monthString))
+    .sort((a, b) => a.date.localeCompare(b.date));
 
   let printWindow: Window | null = null;
   if (!printViaIframe) {
@@ -83,14 +91,14 @@ export const printReceipt = (
     }
   }
 
-  const entriesRowsHtml = customerEntries
+  const entriesRowsHtml = customerDeliveries
     .map(
       (e, idx) => `
       <tr style="border-bottom: 1px solid #f1f5f9;">
         <td style="padding: 8px 12px; font-size: 14px;">${idx + 1}</td>
-        <td style="padding: 8px 12px; font-size: 14px;">${new Date(e.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
+        <td style="padding: 8px 12px; font-size: 14px;">${new Date(e.date + 'T00:00:00').toLocaleDateString('en-US', { day: 'numeric', month: 'short', year: 'numeric' })}</td>
         <td style="padding: 8px 12px; font-size: 14px; text-align: right;">${e.quantity} Litres</td>
-        <td style="padding: 8px 12px; font-size: 14px; text-align: right;">${formatCurrency(e.quantity * customer.rate_per_liter)}</td>
+        <td style="padding: 8px 12px; font-size: 14px; text-align: right;">${formatCurrency(e.cost)}</td>
       </tr>
     `
     )
@@ -240,7 +248,7 @@ export const printReceipt = (
             <tbody>
               ${entriesRowsHtml}
               ${
-                customerEntries.length === 0
+                customerDeliveries.length === 0
                   ? '<tr><td colspan="4" style="text-align: center; padding: 20px; color: #94a3b8;">No milk logs found for this month</td></tr>'
                   : ''
               }
@@ -374,10 +382,9 @@ export const generateAndDownloadUnpaidBillPdf = (
   text(`${unpaidStartDate}  →  ${todayStr}`, margin + 5, y + 11.5, { size: 10, bold: true, color: '#ea580c' });
   y += 22;
 
-  // ── Milk entries table ────────────────────────────────────────────
-  const unpaidEntries = milkEntries
-    .filter(e => e.customer_id === customer.id && e.date >= unpaidStartDate && e.date <= todayStr)
-    .sort((a, b) => a.date.localeCompare(b.date));
+  // ── Milk deliveries table for unpaid period ───────────────────────
+  const unpaidResult = calculateCustomerUnpaidPeriod(customer, milkEntries, payments, todayStr);
+  const unpaidEntries = unpaidResult.unpaidDeliveries;
 
   // Table header
   rect(margin, y, contentW, 9, '#0ea5e9');
@@ -397,7 +404,7 @@ export const generateAndDownloadUnpaidBillPdf = (
       margin + 14, y + 5.5, { size: 8 }
     );
     text(`${Number(entry.quantity).toFixed(1)} L`, margin + 80, y + 5.5, { size: 8 });
-    text(formatCurrency(Number(entry.quantity) * customer.rate_per_liter), pageW - margin - 5, y + 5.5, { size: 8, align: 'right' });
+    text(formatCurrency(entry.cost), pageW - margin - 5, y + 5.5, { size: 8, align: 'right' });
     line(margin, y + rowH, margin + contentW, y + rowH);
     y += rowH;
 

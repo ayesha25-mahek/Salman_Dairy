@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Customer, MilkEntry, Payment } from '../../utils/seedData';
 import { useDb } from '../../context/DbContext';
-import { calculateCustomerBilling, formatCurrency } from '../../utils/calculations';
+import { calculateCustomerBilling, calculateCustomerUnpaidPeriod, getCustomerDailyDeliveries, formatCurrency } from '../../utils/calculations';
 import { printReceipt, exportRegisterToCSV } from '../../services/pdfGenerator';
 import { 
   ArrowLeft, 
@@ -76,55 +76,25 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
   const currentMonthName = new Date().toLocaleString('default', { month: 'long' });
 
   // Compute billing summary for current month
-  const billing = calculateCustomerBilling(customer, milkEntries, payments, currentYear, currentMonth);
+  const billing = calculateCustomerBilling(customer, milkEntries, payments, currentYear, currentMonth, todayStr);
 
   const cleanPhone = customer.phone ? customer.phone.replace(/[^0-9]/g, '') : '';
 
-  // Helper to add 1 day to date string (YYYY-MM-DD)
-  const getNextDay = (dateStr: string) => {
-    const d = new Date(dateStr + 'T00:00:00');
-    d.setDate(d.getDate() + 1);
-    const year = d.getFullYear();
-    const month = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-
   // Compute unpaid bill period and amount
   const unpaidInfo = React.useMemo(() => {
-    const customerPayments = payments.filter(p => p.customer_id === customer.id);
-    let unpaidStartDate = customer.created_at ? customer.created_at.split('T')[0] : todayStr;
-    
-    if (customerPayments.length > 0) {
-      // Find latest paid_till_date
-      const sortedByPaidTill = [...customerPayments].sort((a, b) => b.paid_till_date.localeCompare(a.paid_till_date));
-      const lastPaidTill = sortedByPaidTill[0].paid_till_date;
-      unpaidStartDate = getNextDay(lastPaidTill);
-    }
+    return calculateCustomerUnpaidPeriod(customer, milkEntries, payments, todayStr);
+  }, [customer, milkEntries, payments, todayStr]);
 
-    // Filter milk entries from unpaidStartDate up to today
-    const unpaidEntries = milkEntries.filter(
-      e => e.customer_id === customer.id && e.date >= unpaidStartDate && e.date <= todayStr
-    );
-    const unpaidLiters = unpaidEntries.reduce((sum, e) => sum + Number(e.quantity), 0);
-    const unpaidCost = unpaidLiters * customer.rate_per_liter;
-
-    return {
-      unpaidStartDate,
-      unpaidLiters,
-      unpaidCost
-    };
-  }, [customer, milkEntries, payments]);
-
-  // WhatsApp template for entire month bill
+  // WhatsApp template for entire bill
   const getWhatsAppMessage = () => {
-    const msg = `*Salman Khan's Dairy — Monthly Bill*\n` +
+    const msg = `*Salman Khan's Dairy — Account Statement*\n` +
       `Customer: *${customer.name}*\n` +
       `• Code: *${customer.customer_code}*\n` +
-      `• Total Milk: *${billing.monthlyConsumption.toFixed(1)} Litres*\n` +
+      `• Total Milk Delivered: *${billing.totalMilkConsumed.toFixed(1)} Litres*\n` +
+      `• Milk Paid For: *${billing.paidMilkLitres.toFixed(1)} Litres* (${formatCurrency(billing.totalPaid)})\n` +
       `• Rate: *Rs. ${customer.rate_per_liter}/L*\n` +
-      `• Current Bill: *${formatCurrency(billing.monthlyBill)}*\n` +
       `-----------------------------\n` +
+      `*Total Due Milk: ${billing.dueMilkLitres.toFixed(1)} Litres*\n` +
       `*Total Balance Due: ${formatCurrency(billing.pendingAmount)}*\n\n` +
       `Kindly clear your outstanding balance. Thank you!\n\n` +
       `— *Salman Khan*`;
@@ -137,7 +107,7 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
       `*Salman Khan's Dairy — Unpaid Bill*\n` +
       `Customer: *${customer.name}*\n\n` +
       `📅 Period: ${unpaidInfo.unpaidStartDate} → ${todayStr}\n` +
-      `🧴 Milk: *${unpaidInfo.unpaidLiters.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
+      `🧴 Due Milk: *${billing.dueMilkLitres.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
       `💰 Due Amount: *${formatCurrency(billing.pendingAmount)}*\n\n` +
       `Kindly clear your dues. Shukriya!\n\n` +
       `— *Salman Khan*`;
@@ -247,30 +217,30 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
     setModalStatus('saving');
     try {
       // Calculate paid_till_date automatically based on chronological deliveries
-      const customerEntries = milkEntries
-        .filter(e => e.customer_id === customer.id)
-        .sort((a, b) => a.date.localeCompare(b.date));
-
+      const deliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
       const customerPayments = payments.filter(p => p.customer_id === customer.id);
       const totalPaidBefore = customerPayments.reduce((sum, p) => sum + Number(p.amount), 0);
       const newTotalPaid = totalPaidBefore + Number(amount);
 
+      let coveredPaid = newTotalPaid;
       let computedPaidTill = customer.created_at ? customer.created_at.split('T')[0] : todayStr;
-      let cumulativeBill = 0;
 
-      for (const entry of customerEntries) {
-        const cost = Number(entry.quantity) * customer.rate_per_liter;
-        if (cumulativeBill + cost <= newTotalPaid) {
-          cumulativeBill += cost;
-          computedPaidTill = entry.date;
+      for (const delivery of deliveries) {
+        if (delivery.cost === 0) continue;
+        if (coveredPaid >= delivery.cost) {
+          coveredPaid -= delivery.cost;
+          computedPaidTill = delivery.date;
         } else {
           break;
         }
       }
 
-      if (newTotalPaid >= cumulativeBill && customerEntries.length > 0) {
-        const lastEntryDate = customerEntries[customerEntries.length - 1].date;
-        computedPaidTill = lastEntryDate > todayStr ? lastEntryDate : todayStr;
+      if (deliveries.length > 0 && coveredPaid >= 0) {
+        const totalDeliveryCost = deliveries.reduce((s, d) => s + d.cost, 0);
+        if (newTotalPaid >= totalDeliveryCost) {
+          const lastDeliveryDate = deliveries[deliveries.length - 1].date;
+          computedPaidTill = lastDeliveryDate > todayStr ? lastDeliveryDate : todayStr;
+        }
       }
 
       const res = await addPayment({
@@ -470,29 +440,34 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         </div>
 
         <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">{currentMonthName} Litres</span>
+          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Total Milk Delivered</span>
+          <span className="text-sm font-extrabold text-slate-800 dark:text-white">{billing.totalMilkConsumed.toFixed(1)} Litres</span>
+          <span className="block text-3xs text-slate-400 mt-0.5 font-semibold">Total: {formatCurrency(billing.totalBilled)}</span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
+          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Paid Milk</span>
+          <span className="text-sm font-extrabold text-sky-600">{billing.paidMilkLitres.toFixed(1)} Litres</span>
+          <span className="block text-3xs text-slate-400 mt-0.5 font-semibold">Paid: {formatCurrency(billing.totalPaid)}</span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-orange-50/40 dark:bg-orange-950/20 border border-orange-100/50 dark:border-orange-900/40">
+          <span className="block text-3xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-widest mb-1 font-bold">Total Due Milk</span>
+          <span className="text-sm font-black text-orange-600 dark:text-orange-400">{billing.dueMilkLitres.toFixed(1)} Litres</span>
+        </div>
+
+        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
+          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">{currentMonthName} Milk</span>
           <span className="text-sm font-extrabold text-slate-800 dark:text-white">{billing.monthlyConsumption.toFixed(1)} L</span>
         </div>
 
-        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">{currentMonthName} Bill</span>
-          <span className="text-sm font-extrabold text-slate-850 dark:text-white">{formatCurrency(billing.monthlyBill)}</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Total Bill</span>
-          <span className="text-sm font-extrabold text-slate-800 dark:text-white">{formatCurrency(billing.totalBilled)}</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Total Paid</span>
-          <span className="text-sm font-extrabold text-sky-600">{formatCurrency(billing.totalPaid)}</span>
-        </div>
-
         <div className="p-4 rounded-2xl bg-sky-50/40 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/40 col-span-2">
-          <span className="block text-3xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-widest mb-1 font-bold">Outstanding Balance</span>
+          <span className="block text-3xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-widest mb-1 font-bold">Total Balance Due</span>
           <span className={`text-base font-black ${billing.pendingAmount > 0 ? 'text-red-500' : 'text-sky-600'}`}>
             {formatCurrency(billing.pendingAmount)}
+          </span>
+          <span className="block text-3xs text-slate-500 mt-0.5 font-semibold font-mono">
+            {billing.dueMilkLitres.toFixed(1)} Litres remaining @ Rs.{customer.rate_per_liter}/L
           </span>
         </div>
       </div>
@@ -509,12 +484,12 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
             <span className="font-bold text-slate-700 dark:text-slate-200">{unpaidInfo.unpaidStartDate}</span>
           </div>
           <div>
-            <span className="block text-3xs text-slate-400 uppercase font-semibold">Liters in Unpaid Period</span>
-            <span className="font-bold text-slate-700 dark:text-slate-200">{unpaidInfo.unpaidLiters.toFixed(1)} L</span>
+            <span className="block text-3xs text-orange-500 uppercase font-bold">Total Due Milk</span>
+            <span className="font-black text-orange-600 dark:text-orange-400">{billing.dueMilkLitres.toFixed(1)} Litres</span>
           </div>
           <div>
-            <span className="block text-3xs text-slate-400 uppercase font-semibold">Period Milk Amount</span>
-            <span className="font-bold text-slate-700 dark:text-slate-200">{formatCurrency(unpaidInfo.unpaidCost)}</span>
+            <span className="block text-3xs text-slate-400 uppercase font-semibold">Paid Milk Covered</span>
+            <span className="font-bold text-sky-600">{billing.paidMilkLitres.toFixed(1)} Litres ({formatCurrency(billing.totalPaid)})</span>
           </div>
           <div>
             <span className="block text-3xs text-red-500 uppercase font-bold">Total Due Balance</span>
