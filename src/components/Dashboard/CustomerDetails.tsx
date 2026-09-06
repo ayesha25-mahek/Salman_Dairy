@@ -17,7 +17,8 @@ import {
   CalendarDays,
   RotateCcw,
   Edit2,
-  Save
+  Save,
+  History
 } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -39,6 +40,7 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
   } = useDb();
   
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
 
   // ── Add Phone Modal (for call/whatsapp when phone is missing) ──
   const [showAddPhoneModal, setShowAddPhoneModal] = useState(false);
@@ -405,18 +407,23 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
           {/* Status badge */}
           <div className="self-start sm:self-center">
             {billing.status === 'Paid' && (
-              <span className="inline-flex items-center rounded-full bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-500 border border-sky-500/20">
+              <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                 Paid
               </span>
             )}
-            {billing.status === 'Partially Paid' && (
-              <span className="inline-flex items-center rounded-full bg-orange-500/10 px-3 py-1 text-xs font-bold text-orange-500 border border-orange-500/20">
+            {billing.hasOverdue && (
+              <span className="inline-flex items-center rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold text-red-500 border border-red-500/20">
+                Overdue (Last Month Pending)
+              </span>
+            )}
+            {!billing.hasOverdue && billing.status === 'Partially Paid' && (
+              <span className="inline-flex items-center rounded-full bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-600 dark:text-sky-400 border border-sky-500/20">
                 Partially Paid
               </span>
             )}
-            {billing.status === 'Pending' && (
-              <span className="inline-flex items-center rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold text-red-500 border border-red-500/20">
-                Pending Dues
+            {!billing.hasOverdue && billing.status === 'Pending' && (
+              <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-xs font-bold text-slate-650 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                Current Month Dues
               </span>
             )}
           </div>
@@ -427,73 +434,107 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         </p>
       </div>
 
-      {/* Grid: Details Ledger */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-450 uppercase tracking-widest mb-1">Rate / Litre</span>
-          <span className="text-sm font-extrabold text-slate-800 dark:text-white">Rs. {customer.rate_per_liter}</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Daily Delivery</span>
-          <span className="text-sm font-extrabold text-slate-800 dark:text-white">{customer.default_quantity} Litre(s)</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Total Milk Delivered</span>
-          <span className="text-sm font-extrabold text-slate-800 dark:text-white">{billing.totalMilkConsumed.toFixed(1)} Litres</span>
-          <span className="block text-3xs text-slate-400 mt-0.5 font-semibold">Total: {formatCurrency(billing.totalBilled)}</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">Paid Milk</span>
-          <span className="text-sm font-extrabold text-sky-600">{billing.paidMilkLitres.toFixed(1)} Litres</span>
-          <span className="block text-3xs text-slate-400 mt-0.5 font-semibold">Paid: {formatCurrency(billing.totalPaid)}</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-orange-50/40 dark:bg-orange-950/20 border border-orange-100/50 dark:border-orange-900/40">
-          <span className="block text-3xs font-bold text-orange-600 dark:text-orange-400 uppercase tracking-widest mb-1 font-bold">Total Due Milk</span>
-          <span className="text-sm font-black text-orange-600 dark:text-orange-400">{billing.dueMilkLitres.toFixed(1)} Litres</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-slate-50/50 dark:bg-slate-900/60 border border-slate-100 dark:border-slate-850">
-          <span className="block text-3xs font-bold text-slate-455 uppercase tracking-widest mb-1">{currentMonthName} Milk</span>
-          <span className="text-sm font-extrabold text-slate-800 dark:text-white">{billing.monthlyConsumption.toFixed(1)} L</span>
-        </div>
-
-        <div className="p-4 rounded-2xl bg-sky-50/40 dark:bg-sky-950/20 border border-sky-100/50 dark:border-sky-900/40 col-span-2">
-          <span className="block text-3xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-widest mb-1 font-bold">Total Balance Due</span>
-          <span className={`text-base font-black ${billing.pendingAmount > 0 ? 'text-red-500' : 'text-sky-600'}`}>
-            {formatCurrency(billing.pendingAmount)}
-          </span>
-          <span className="block text-3xs text-slate-500 mt-0.5 font-semibold font-mono">
-            {billing.dueMilkLitres.toFixed(1)} Litres remaining @ Rs.{customer.rate_per_liter}/L
-          </span>
-        </div>
-      </div>
-
-      {/* Unpaid Bill Period Summary */}
-      <div className="p-5 rounded-2xl bg-red-50/20 dark:bg-red-950/10 border border-red-100/50 dark:border-red-900/20 space-y-3">
-        <h4 className="text-2xs font-bold text-red-650 dark:text-red-400 uppercase tracking-widest flex items-center gap-1.5">
-          <CalendarDays size={14} />
-          <span>Unpaid Period Ledger Summary</span>
-        </h4>
-        <div className="grid grid-cols-2 gap-4 text-xs">
-          <div>
-            <span className="block text-3xs text-slate-400 uppercase font-semibold">Unpaid From Date</span>
-            <span className="font-bold text-slate-700 dark:text-slate-200">{unpaidInfo.unpaidStartDate}</span>
+      {/* ── Last Month Overdue Red Section ── */}
+      {billing.hasOverdue && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 gap-3">
+          <div className="flex items-center gap-2.5">
+            <AlertCircle size={18} className="text-red-500 shrink-0" />
+            <div>
+              <span className="block font-black text-xs uppercase tracking-wide">
+                Last Month Amount Pending: {formatCurrency(billing.previousMonthPending)}
+              </span>
+              <span className="block text-3xs text-red-500/80 mt-0.5">
+                Unpaid balance from {billing.previousMonthName} / past months. Recording payment for this amount will clear this red overdue alert.
+              </span>
+            </div>
           </div>
+          <button
+            onClick={() => {
+              setAmount(billing.previousMonthPending.toString());
+              setShowPaymentModal(true);
+            }}
+            className="shrink-0 px-3.5 py-1.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-2xs uppercase tracking-wider shadow-xs transition"
+          >
+            Clear Last Month Dues
+          </button>
+        </div>
+      )}
+
+      {/* 4 Clean Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Box 1: Daily Delivery & Rate */}
+        <div className="p-4.5 rounded-2xl bg-slate-50/70 dark:bg-slate-900/60 border border-slate-150 dark:border-slate-850 flex flex-col justify-between">
           <div>
-            <span className="block text-3xs text-orange-500 uppercase font-bold">Total Due Milk</span>
-            <span className="font-black text-orange-600 dark:text-orange-400">{billing.dueMilkLitres.toFixed(1)} Litres</span>
+            <span className="block text-3xs font-bold text-slate-400 uppercase tracking-wider mb-1">
+              Daily Delivery & Rate
+            </span>
+            <span className="block text-base font-black text-slate-850 dark:text-white">
+              {customer.default_quantity} Litre(s)
+            </span>
           </div>
-          <div>
-            <span className="block text-3xs text-slate-400 uppercase font-semibold">Paid Milk Covered</span>
-            <span className="font-bold text-sky-600">{billing.paidMilkLitres.toFixed(1)} Litres ({formatCurrency(billing.totalPaid)})</span>
+          <div className="mt-2 pt-2 border-t border-slate-200/60 dark:border-slate-800 flex items-center justify-between text-3xs">
+            <span className="text-slate-400 font-semibold">Rate per Litre:</span>
+            <span className="font-bold text-slate-700 dark:text-slate-200">Rs. {customer.rate_per_liter}</span>
           </div>
+        </div>
+
+        {/* Box 2: This Month (Milk 1st to date & price) */}
+        <div className="p-4.5 rounded-2xl bg-sky-50/40 dark:bg-sky-950/20 border border-sky-100/60 dark:border-sky-900/40 flex flex-col justify-between">
           <div>
-            <span className="block text-3xs text-red-500 uppercase font-bold">Total Due Balance</span>
-            <span className="font-black text-red-600 dark:text-red-400">{formatCurrency(billing.pendingAmount)}</span>
+            <span className="block text-3xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider mb-1">
+              This Month ({currentMonthName})
+            </span>
+            <span className="block text-base font-black text-slate-850 dark:text-white">
+              {billing.monthlyConsumption.toFixed(1)} Litres
+            </span>
+          </div>
+          <div className="mt-2 pt-2 border-t border-sky-100 dark:border-sky-900/30 flex items-center justify-between text-3xs">
+            <span className="text-slate-400 font-semibold">Total Month Bill:</span>
+            <span className="font-bold text-sky-600 dark:text-sky-400">{formatCurrency(billing.monthlyBill)}</span>
+          </div>
+        </div>
+
+        {/* Box 3: Last Month's Pending (Dynamic previous month name) */}
+        <div className={`p-4.5 rounded-2xl flex flex-col justify-between ${
+          billing.hasOverdue 
+            ? 'bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40' 
+            : 'bg-slate-50/70 dark:bg-slate-900/60 border border-slate-150 dark:border-slate-850'
+        }`}>
+          <div>
+            <span className={`block text-3xs font-bold uppercase tracking-wider mb-1 ${
+              billing.hasOverdue ? 'text-red-500 font-bold' : 'text-slate-400'
+            }`}>
+              Last Month's Pending ({billing.previousMonthName})
+            </span>
+            <span className={`block text-base font-black ${
+              billing.hasOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-white'
+            }`}>
+              {formatCurrency(billing.previousMonthPending)}
+            </span>
+          </div>
+          <div className={`mt-2 pt-2 border-t flex items-center justify-between text-3xs ${
+            billing.hasOverdue ? 'border-red-100 dark:border-red-900/30' : 'border-slate-200/60 dark:border-slate-800'
+          }`}>
+            <span className="text-slate-400 font-semibold">Unpaid Litres:</span>
+            <span className={`font-bold ${billing.hasOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-300'}`}>
+              {customer.rate_per_liter > 0 ? (billing.previousMonthPending / customer.rate_per_liter).toFixed(1) : '0.0'} L
+            </span>
+          </div>
+        </div>
+
+        {/* Box 4: Total Balance Due */}
+        <div className="p-4.5 rounded-2xl bg-sky-500/10 dark:bg-sky-500/10 border border-sky-500/20 flex flex-col justify-between">
+          <div>
+            <span className="block text-3xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider mb-1">
+              Total Balance Due
+            </span>
+            <span className={`block text-base font-black ${billing.pendingAmount > 0 ? (billing.hasOverdue ? 'text-red-500' : 'text-sky-600') : 'text-emerald-600'}`}>
+              {formatCurrency(billing.pendingAmount)}
+            </span>
+          </div>
+          <div className="mt-2 pt-2 border-t border-sky-500/15 flex items-center justify-between text-3xs">
+            <span className="text-slate-400 font-semibold">Total Due Milk:</span>
+            <span className="font-bold text-sky-600 dark:text-sky-400">{billing.dueMilkLitres.toFixed(1)} L</span>
           </div>
         </div>
       </div>
@@ -586,8 +627,17 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         </div>
       </div>
 
-      {/* DROP CUSTOMER ACTION BUTTON (AT VERY BOTTOM) */}
+      {/* ACTION BUTTONS (AT VERY BOTTOM) */}
       <div className="pt-4 border-t border-slate-100 dark:border-slate-855 flex flex-col sm:flex-row gap-3">
+        {/* See Payment History Button */}
+        <button
+          onClick={() => setShowHistoryModal(true)}
+          className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl bg-sky-50 dark:bg-sky-950/30 hover:bg-sky-100 dark:hover:bg-sky-900/40 text-sky-700 dark:text-sky-300 text-xs font-bold uppercase tracking-wide transition focus:outline-none border border-sky-200 dark:border-sky-800 shadow-xs"
+        >
+          <History size={15} />
+          <span>See Payment History ({customerPayments.length})</span>
+        </button>
+
         {!customer.deactivated_at ? (
           <button
             onClick={handleDropCustomer}
@@ -643,9 +693,16 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
               <form onSubmit={handleMarkPayment} className="space-y-4">
                 {/* Amount */}
                 <div>
-                  <label className="block text-3xs font-bold text-slate-400 uppercase tracking-widest mb-1">
-                    Amount Received (Rs) *
-                  </label>
+                  <div className="flex items-center justify-between mb-1">
+                    <label className="block text-3xs font-bold text-slate-400 uppercase tracking-widest">
+                      Amount Received (Rs) *
+                    </label>
+                    {billing.hasOverdue && (
+                      <span className="text-3xs font-bold text-red-500">
+                        Last Month Due: {formatCurrency(billing.previousMonthPending)}
+                      </span>
+                    )}
+                  </div>
                   <input
                     type="number"
                     required
@@ -655,6 +712,28 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
                     onChange={(e) => setAmount(e.target.value)}
                     className="w-full px-4.5 py-2.5 rounded-xl border border-slate-250 dark:border-slate-850 bg-slate-50 dark:bg-slate-950 text-slate-800 dark:text-white focus:outline-none focus:ring-1 focus:ring-sky-500 font-mono text-xs font-bold"
                   />
+                  {(billing.hasOverdue || billing.pendingAmount > 0) && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                      {billing.hasOverdue && (
+                        <button
+                          type="button"
+                          onClick={() => setAmount(billing.previousMonthPending.toString())}
+                          className="px-2 py-0.5 rounded-md bg-red-50 text-red-600 border border-red-200 text-3xs font-bold hover:bg-red-100 transition"
+                        >
+                          Fill Last Month: {formatCurrency(billing.previousMonthPending)}
+                        </button>
+                      )}
+                      {billing.pendingAmount > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => setAmount(billing.pendingAmount.toString())}
+                          className="px-2 py-0.5 rounded-md bg-sky-50 text-sky-600 border border-sky-200 text-3xs font-bold hover:bg-sky-100 transition"
+                        >
+                          Fill Total: {formatCurrency(billing.pendingAmount)}
+                        </button>
+                      )}
+                    </div>
+                  )}
                 </div>
 
                 {/* Notes */}
@@ -941,6 +1020,130 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
                   {editStatus === 'saving' ? 'Saving…' : 'Save Changes'}
                 </button>
               </form>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ════════════════════════════════════════ */}
+      {/* Payment History Modal                    */}
+      {/* ════════════════════════════════════════ */}
+      <AnimatePresence>
+        {showHistoryModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => setShowHistoryModal(false)}
+              className="absolute inset-0 bg-slate-900/60 backdrop-blur-sm"
+            />
+
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.95, opacity: 0 }}
+              className="relative w-full max-w-lg overflow-hidden rounded-2xl bg-white dark:bg-slate-955 p-6 shadow-2xl border border-slate-200 dark:border-slate-850 z-10 text-left max-h-[85vh] flex flex-col"
+            >
+              <button
+                onClick={() => setShowHistoryModal(false)}
+                className="absolute top-4 right-4 text-slate-400 hover:text-slate-650 dark:hover:text-slate-250 p-1 rounded-lg"
+              >
+                <X size={18} />
+              </button>
+
+              {/* Header */}
+              <div className="flex items-center gap-3 mb-4 pb-3 border-b border-slate-100 dark:border-slate-850">
+                <div className="p-2.5 rounded-xl bg-sky-500/10 text-sky-500">
+                  <History size={20} />
+                </div>
+                <div>
+                  <h4 className="font-bold text-slate-850 dark:text-white text-base font-display leading-tight">
+                    Payment History
+                  </h4>
+                  <div className="flex items-center gap-2 mt-0.5">
+                    <span className="text-xs font-semibold text-slate-600 dark:text-slate-300">
+                      {customer.name}
+                    </span>
+                    <span className="text-3xs font-mono font-bold text-sky-500 bg-sky-50 dark:bg-sky-950/40 px-1.5 py-0.5 rounded">
+                      {customer.customer_code}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Summary Stats Strip */}
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-150 dark:border-slate-850">
+                  <span className="block text-3xs font-bold text-slate-400 uppercase tracking-wider">Total Received</span>
+                  <span className="block text-sm font-black text-emerald-600 dark:text-emerald-400 mt-0.5">
+                    {formatCurrency(billing.totalPaid)}
+                  </span>
+                </div>
+                <div className="p-3 rounded-xl bg-slate-50 dark:bg-slate-900/60 border border-slate-150 dark:border-slate-850">
+                  <span className="block text-3xs font-bold text-slate-400 uppercase tracking-wider">Total Records</span>
+                  <span className="block text-sm font-black text-slate-800 dark:text-white mt-0.5">
+                    {customerPayments.length} Payment(s)
+                  </span>
+                </div>
+              </div>
+
+              {/* Payments List */}
+              <div className="flex-1 overflow-y-auto space-y-2.5 pr-1 max-h-[380px]">
+                {customerPayments.length === 0 ? (
+                  <div className="py-12 text-center text-slate-400 text-xs font-semibold">
+                    No payment records found for this customer.
+                  </div>
+                ) : (
+                  customerPayments.map((p, idx) => (
+                    <div 
+                      key={p.id} 
+                      className="p-3.5 rounded-xl bg-slate-50/70 dark:bg-slate-900/40 border border-slate-150 dark:border-slate-850 flex items-center justify-between hover:bg-slate-50 dark:hover:bg-slate-900/70 transition"
+                    >
+                      <div className="flex items-center gap-3">
+                        <div className="w-8 h-8 rounded-full bg-emerald-500/10 text-emerald-600 flex items-center justify-center font-bold text-xs shrink-0">
+                          #{customerPayments.length - idx}
+                        </div>
+                        <div>
+                          <span className="block font-black text-slate-850 dark:text-white text-xs">
+                            {formatCurrency(p.amount)}
+                          </span>
+                          <span className="block text-3xs text-slate-400 mt-0.5 font-medium">
+                            Paid on: <strong className="text-slate-600 dark:text-slate-300">{new Date(p.payment_date).toLocaleDateString()}</strong> • Covered till: {new Date(p.paid_till_date).toLocaleDateString()}
+                          </span>
+                          {p.notes && (
+                            <span className="block text-3xs text-sky-600 dark:text-sky-400 mt-0.5 italic">
+                              Note: {p.notes}
+                            </span>
+                          )}
+                        </div>
+                      </div>
+
+                      <button
+                        onClick={async () => {
+                          if (window.confirm(`Delete payment of ${formatCurrency(p.amount)} from ${new Date(p.payment_date).toLocaleDateString()}?`)) {
+                            await deletePayment(p.id);
+                          }
+                        }}
+                        className="p-2 rounded-lg text-slate-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 transition focus:outline-none shrink-0"
+                        title="Delete this payment record"
+                      >
+                        <Trash2 size={15} />
+                      </button>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="mt-4 pt-3 border-t border-slate-100 dark:border-slate-850 flex justify-end">
+                <button
+                  onClick={() => setShowHistoryModal(false)}
+                  className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold rounded-xl text-xs uppercase tracking-wide transition"
+                >
+                  Close
+                </button>
+              </div>
             </motion.div>
           </div>
         )}

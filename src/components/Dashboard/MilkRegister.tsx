@@ -1,11 +1,11 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useDb } from '../../context/DbContext';
 import { MilkEntry } from '../../utils/seedData';
-import { getDaysInMonth } from '../../utils/calculations';
+import { getDaysInMonth, checkCustomerOverdue, formatCurrency } from '../../utils/calculations';
 import { Calendar, Search, Save, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
 
 export const MilkRegister: React.FC = () => {
-  const { customers, milkEntries, saveMilkEntry, saveMilkEntriesBatch, loading } = useDb();
+  const { customers, milkEntries, payments, saveMilkEntry, saveMilkEntriesBatch, loading } = useDb();
   
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth() + 1);
@@ -174,9 +174,9 @@ export const MilkRegister: React.FC = () => {
   };
 
   /**
-   * Handle cell value change
+   * Handle cell value change (Local UI edit only — saved to DB only when Save Register is clicked)
    */
-  const handleCellChange = async (customerId: string, date: string, val: string) => {
+  const handleCellChange = (customerId: string, date: string, val: string) => {
     // Validate number input or empty string
     if (val !== '' && isNaN(Number(val))) return;
     
@@ -187,11 +187,6 @@ export const MilkRegister: React.FC = () => {
       ...prev,
       [key]: val
     }));
-
-    // Auto-persist valid numeric edits to db so other tabs immediately reflect the new milk quantity
-    if (val !== '') {
-      await saveMilkEntry(customerId, date, Number(val));
-    }
   };
 
   /**
@@ -288,14 +283,19 @@ export const MilkRegister: React.FC = () => {
 
         {/* Action button */}
         <div className="flex items-center gap-2">
+          {dirtyKeys.size > 0 && savingState === 'idle' && (
+            <span className="flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400 font-bold bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/50 px-2.5 py-1 rounded-lg animate-pulse-subtle">
+              ● Unsaved edits ({dirtyKeys.size})
+            </span>
+          )}
           {savingState === 'saving' && (
             <span className="flex items-center gap-1 text-xs text-sky-500 font-semibold">
               <RefreshCw size={14} className="animate-spin" /> Saving...
             </span>
           )}
           {savingState === 'saved' && (
-            <span className="flex items-center gap-1 text-xs text-sky-655 font-bold">
-              <CheckCircle size={14} className="text-sky-500" /> Saved Changes
+            <span className="flex items-center gap-1 text-xs text-emerald-600 font-bold">
+              <CheckCircle size={14} className="text-emerald-500" /> Saved Changes
             </span>
           )}
           {savingState === 'error' && (
@@ -388,16 +388,30 @@ export const MilkRegister: React.FC = () => {
                   </td>
                 </tr>
               ) : (
-                filteredCustomers.map(customer => (
+                filteredCustomers.map(customer => {
+                  const overdueInfo = checkCustomerOverdue(customer, milkEntries, payments, selectedYear, selectedMonth);
+                  const isOverdue = overdueInfo.hasOverdue;
+
+                  return (
                   <tr key={customer.id} className="hover:bg-slate-50/40 dark:hover:bg-slate-900/20">
                     {/* Customer Code & Name column */}
                     <td className="sticky left-0 z-10 bg-white dark:bg-slate-950 border-r border-slate-200 dark:border-slate-850 p-3 font-semibold shadow-sm min-w-[130px] flex flex-col justify-center">
-                      <span className="font-bold text-slate-850 dark:text-white truncate">
+                      <span 
+                        className={`font-bold truncate ${isOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-850 dark:text-white'}`}
+                        title={isOverdue ? `Last month payment pending: ${formatCurrency(overdueInfo.previousMonthPending)}` : undefined}
+                      >
                         {customer.name}
                       </span>
-                      <span className="text-3xs font-mono text-slate-400 mt-0.5 font-bold">
-                        {customer.customer_code}
-                      </span>
+                      <div className="flex items-center gap-1 mt-0.5">
+                        <span className="text-3xs font-mono text-slate-400 font-bold">
+                          {customer.customer_code}
+                        </span>
+                        {isOverdue && (
+                          <span className="text-4xs uppercase tracking-wider px-1 py-0.2 rounded bg-red-100 dark:bg-red-950/60 text-red-600 dark:text-red-400 font-bold">
+                            Overdue
+                          </span>
+                        )}
+                      </div>
                     </td>
 
                     {/* Day Input cells */}
@@ -436,9 +450,10 @@ export const MilkRegister: React.FC = () => {
                       );
                     })}
                   </tr>
-                ))
-              )}
-            </tbody>
+                );
+              })
+            )}
+          </tbody>
           </table>
         </div>
       </div>

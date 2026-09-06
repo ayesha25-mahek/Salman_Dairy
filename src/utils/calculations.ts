@@ -20,8 +20,18 @@ export interface CustomerBillingSummary {
   totalBilled: number;
   totalPaid: number;
   pendingAmount: number;
+  currentMonthMilkConsumed: number;
+  currentMonthBill: number;
+  currentMonthPaid: number;
+  currentMonthPending: number;
+  previousMonthMilkConsumed: number;
+  previousMonthBilled: number;
+  previousMonthPaid: number;
+  previousMonthPending: number;
+  hasOverdue: boolean;
+  previousMonthName: string;
   lastPaymentDate: string | null;
-  status: 'Paid' | 'Partially Paid' | 'Pending';
+  status: 'Paid' | 'Partially Paid' | 'Pending' | 'Overdue';
   monthlyConsumption: number;
   monthlyBill: number;
 }
@@ -100,8 +110,11 @@ export const getCustomerDailyDeliveries = (
   return deliveries;
 };
 
+export const BASELINE_START_DATE = '2026-09-01';
+
 /**
  * Calculates the unpaid period, start date, unpaid milk liters, and unpaid cost based on total payments made.
+ * Starts from September 1, 2026 baseline.
  */
 export const calculateCustomerUnpaidPeriod = (
   customer: Customer,
@@ -109,8 +122,11 @@ export const calculateCustomerUnpaidPeriod = (
   payments: Payment[],
   todayStr = new Date().toISOString().split('T')[0]
 ): CustomerUnpaidPeriod => {
-  const deliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
-  const customerPayments = payments.filter(p => p.customer_id === customer.id);
+  const allDeliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
+  const deliveries = allDeliveries.filter(d => d.date >= BASELINE_START_DATE);
+  const customerPayments = payments.filter(
+    p => p.customer_id === customer.id && p.payment_date >= BASELINE_START_DATE
+  );
   const totalPaid = customerPayments.reduce((sum, p) => sum + Number(p.amount), 0);
 
   let coveredPaid = totalPaid;
@@ -154,11 +170,10 @@ export const calculateCustomerUnpaidPeriod = (
 
 /**
  * Calculates billing summary for a specific customer.
- * Keeps track of milk first:
- * - totalMilkConsumed: Total milk delivered across all records / months
- * - paidMilkLitres: Milk volume covered by all payments (totalPaid / rate)
- * - dueMilkLitres: Remaining unpaid milk (totalMilkConsumed - paidMilkLitres)
- * - pendingAmount: Remaining unpaid bill (dueMilkLitres * rate)
+ * Counts dues starting from September 1, 2026 (all prior months cleared / 0 dues).
+ * - Current month pending: milk deliveries from the 1st of the active month up to now * rate_per_liter
+ * - Previous month pending: unpaid balance from past months (since Sept 1, 2026) before the 1st of current month
+ * - Overdue: true if previous month pending > 0 (triggers red markings from October onwards if September unpaid)
  */
 export const calculateCustomerBilling = (
   customer: Customer,
@@ -168,47 +183,82 @@ export const calculateCustomerBilling = (
   currentMonth = new Date().getMonth() + 1,
   todayStr = new Date().toISOString().split('T')[0]
 ): CustomerBillingSummary => {
-  const deliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
-  const customerPayments = payments.filter(p => p.customer_id === customer.id);
+  const allDeliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
+  const activeCycleDeliveries = allDeliveries.filter(d => d.date >= BASELINE_START_DATE);
+  const customerPayments = payments.filter(
+    p => p.customer_id === customer.id && p.payment_date >= BASELINE_START_DATE
+  );
 
-  // 1. Total Milk Consumed across all records
-  const totalMilkConsumed = deliveries.reduce((sum, entry) => sum + entry.quantity, 0);
+  // Month identifiers
+  const monthString = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
+  const currentMonthStart = `${monthString}-01`;
 
-  // 2. Total Cash Paid
+  // 1. Split Deliveries into Past Months (since Sept 1, 2026) vs Active Month
+  const previousDeliveries = activeCycleDeliveries.filter(d => d.date < currentMonthStart);
+  const currentMonthDeliveries = activeCycleDeliveries.filter(d => d.date.startsWith(monthString));
+
+  // 2. Past Months Calculation (since Sept 1, 2026)
+  const previousMonthMilkConsumed = previousDeliveries.reduce((sum, entry) => sum + entry.quantity, 0);
+  const previousMonthBilled = previousMonthMilkConsumed * customer.rate_per_liter;
+
+  // 3. Active Month Calculation
+  const currentMonthMilkConsumed = currentMonthDeliveries.reduce((sum, entry) => sum + entry.quantity, 0);
+  const currentMonthBill = currentMonthMilkConsumed * customer.rate_per_liter;
+
+  // 4. Overall Totals for Active Cycle
+  const totalMilkConsumed = activeCycleDeliveries.reduce((sum, entry) => sum + entry.quantity, 0);
+  const totalBilled = totalMilkConsumed * customer.rate_per_liter;
   const totalPaid = customerPayments.reduce((sum, payment) => sum + Number(payment.amount), 0);
 
-  // 3. Litres of Milk Paid (subtract milk equivalent of the money paid)
+  // 5. Litres of Milk Paid & Due
   const paidMilkLitres = customer.rate_per_liter > 0 ? (totalPaid / customer.rate_per_liter) : 0;
-
-  // 4. Due Milk (Unpaid Milk Litres = Total Milk minus Paid Milk)
   const dueMilkLitres = Math.max(0, totalMilkConsumed - paidMilkLitres);
 
-  // 5. Total Billed Amount & Pending Amount
-  const totalBilled = totalMilkConsumed * customer.rate_per_liter;
-  const pendingAmount = Math.max(0, dueMilkLitres * customer.rate_per_liter);
+  // 6. Chronological Payment Allocation (First clear past months, then active month)
+  let previousMonthPaid = 0;
+  let previousMonthPending = 0;
+  let currentMonthPaid = 0;
+  let currentMonthPending = 0;
 
-  // 6. Last Payment Date
+  if (totalPaid <= previousMonthBilled) {
+    previousMonthPaid = totalPaid;
+    previousMonthPending = previousMonthBilled - totalPaid;
+    currentMonthPaid = 0;
+    currentMonthPending = currentMonthBill;
+  } else {
+    previousMonthPaid = previousMonthBilled;
+    previousMonthPending = 0;
+    const remainingForCurrent = totalPaid - previousMonthBilled;
+    currentMonthPaid = Math.min(currentMonthBill, remainingForCurrent);
+    currentMonthPending = Math.max(0, currentMonthBill - remainingForCurrent);
+  }
+
+  const pendingAmount = previousMonthPending + currentMonthPending;
+  const hasOverdue = previousMonthPending > 0.01;
+
+  // Previous month name for clean labeling
+  const prevDate = new Date(currentYear, currentMonth - 2, 1);
+  const previousMonthName = prevDate.toLocaleString('default', { month: 'long' });
+
+  // 7. Last Payment Date (checks all payment logs)
   let lastPaymentDate: string | null = null;
-  if (customerPayments.length > 0) {
-    const sortedPayments = [...customerPayments].sort(
+  const allCustomerPayments = payments.filter(p => p.customer_id === customer.id);
+  if (allCustomerPayments.length > 0) {
+    const sortedPayments = [...allCustomerPayments].sort(
       (a, b) => new Date(b.payment_date).getTime() - new Date(a.payment_date).getTime()
     );
     lastPaymentDate = sortedPayments[0].payment_date;
   }
 
-  // 7. Status Badge
-  let status: 'Paid' | 'Partially Paid' | 'Pending' = 'Pending';
-  if (dueMilkLitres <= 0.001 || pendingAmount <= 0) {
+  // 8. Status Badge
+  let status: 'Paid' | 'Partially Paid' | 'Pending' | 'Overdue' = 'Pending';
+  if (dueMilkLitres <= 0.001 || pendingAmount <= 0.01) {
     status = 'Paid';
+  } else if (hasOverdue) {
+    status = 'Overdue';
   } else if (totalPaid > 0) {
     status = 'Partially Paid';
   }
-
-  // 8. Monthly Consumption (Current / Selected Month)
-  const monthString = `${currentYear}-${String(currentMonth).padStart(2, '0')}`;
-  const currentMonthDeliveries = deliveries.filter(d => d.date.startsWith(monthString));
-  const monthlyConsumption = currentMonthDeliveries.reduce((sum, entry) => sum + entry.quantity, 0);
-  const monthlyBill = monthlyConsumption * customer.rate_per_liter;
 
   return {
     totalMilkConsumed,
@@ -217,10 +267,41 @@ export const calculateCustomerBilling = (
     totalBilled,
     totalPaid,
     pendingAmount,
+    currentMonthMilkConsumed,
+    currentMonthBill,
+    currentMonthPaid,
+    currentMonthPending,
+    previousMonthMilkConsumed,
+    previousMonthBilled,
+    previousMonthPaid,
+    previousMonthPending,
+    hasOverdue,
+    previousMonthName,
     lastPaymentDate,
     status,
-    monthlyConsumption,
-    monthlyBill
+    monthlyConsumption: currentMonthMilkConsumed,
+    monthlyBill: currentMonthBill
+  };
+};
+
+/**
+ * Quick helper to check if a customer has overdue dues from last month
+ */
+export const checkCustomerOverdue = (
+  customer: Customer,
+  milkEntries: MilkEntry[],
+  payments: Payment[],
+  currentYear = new Date().getFullYear(),
+  currentMonth = new Date().getMonth() + 1,
+  todayStr = new Date().toISOString().split('T')[0]
+) => {
+  const billing = calculateCustomerBilling(customer, milkEntries, payments, currentYear, currentMonth, todayStr);
+  return {
+    hasOverdue: billing.hasOverdue,
+    previousMonthPending: billing.previousMonthPending,
+    currentMonthPending: billing.currentMonthPending,
+    totalPending: billing.pendingAmount,
+    previousMonthName: billing.previousMonthName
   };
 };
 

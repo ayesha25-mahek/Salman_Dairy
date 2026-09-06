@@ -99,18 +99,23 @@ export const CustomerLookup: React.FC = () => {
                 {/* Status Badge */}
                 <div>
                   {billingDetails.status === 'Paid' && (
-                    <span className="inline-flex items-center rounded-full bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-550 border border-sky-500/20">
+                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
                       Paid
                     </span>
                   )}
-                  {billingDetails.status === 'Partially Paid' && (
-                    <span className="inline-flex items-center rounded-full bg-orange-500/10 px-3 py-1 text-xs font-bold text-orange-500 border border-orange-500/20">
+                  {billingDetails.hasOverdue && (
+                    <span className="inline-flex items-center rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold text-red-500 border border-red-500/20">
+                      Overdue (Past Dues)
+                    </span>
+                  )}
+                  {!billingDetails.hasOverdue && billingDetails.status === 'Partially Paid' && (
+                    <span className="inline-flex items-center rounded-full bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-600 dark:text-sky-400 border border-sky-500/20">
                       Partially Paid
                     </span>
                   )}
-                  {billingDetails.status === 'Pending' && (
-                    <span className="inline-flex items-center rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold text-red-500 border border-red-500/20">
-                      Pending Payment
+                  {!billingDetails.hasOverdue && billingDetails.status === 'Pending' && (
+                    <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-xs font-bold text-slate-650 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
+                      Current Month Dues
                     </span>
                   )}
                 </div>
@@ -170,9 +175,9 @@ export const CustomerLookup: React.FC = () => {
 
                 <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-slate-900/50">
                   <span className="block text-2xs font-semibold text-slate-400 uppercase tracking-wider mb-1">
-                    Pending Amount
+                    Total Pending Due
                   </span>
-                  <span className={`text-sm font-black ${billingDetails.pendingAmount > 0 ? 'text-red-500' : 'text-sky-600'}`}>
+                  <span className={`text-sm font-black ${billingDetails.pendingAmount > 0 ? (billingDetails.hasOverdue ? 'text-red-500' : 'text-sky-600') : 'text-emerald-600'}`}>
                     {formatCurrency(billingDetails.pendingAmount)}
                   </span>
                 </div>

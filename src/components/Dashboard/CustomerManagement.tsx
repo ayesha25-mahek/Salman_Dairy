@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useDb } from '../../context/DbContext';
-import { Search, ChevronRight, UserPlus } from 'lucide-react';
+import { Search, ChevronRight, UserPlus, AlertCircle } from 'lucide-react';
+import { checkCustomerOverdue } from '../../utils/calculations';
 import { CustomerDetails } from './CustomerDetails';
 
 interface CustomerManagementProps {
@@ -8,7 +9,7 @@ interface CustomerManagementProps {
 }
 
 export const CustomerManagement: React.FC<CustomerManagementProps> = ({ setActiveTab }) => {
-  const { customers } = useDb();
+  const { customers, milkEntries, payments } = useDb();
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState<string | null>(null);
 
@@ -78,28 +79,44 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ setActiv
             ) : (
               filteredCustomers.map(customer => {
                 const isSelected = selectedCustomerId === customer.id;
+                const overdueInfo = checkCustomerOverdue(customer, milkEntries, payments);
+                const isOverdue = overdueInfo.hasOverdue;
+
                 return (
                   <button
                     key={customer.id}
                     onClick={() => setSelectedCustomerId(customer.id)}
                     className={`w-full flex items-center justify-between p-4 text-left transition-colors focus:outline-none ${
                       isSelected
-                        ? 'bg-sky-50 dark:bg-sky-950/20 border-l-4 border-sky-500 pl-3'
-                        : 'hover:bg-slate-50/60 dark:hover:bg-slate-900/30'
+                        ? isOverdue
+                          ? 'bg-red-50 dark:bg-red-950/20 border-l-4 border-red-500 pl-3'
+                          : 'bg-sky-50 dark:bg-sky-950/20 border-l-4 border-sky-500 pl-3'
+                        : isOverdue 
+                          ? 'bg-red-50/30 hover:bg-red-50/60 dark:hover:bg-red-950/30'
+                          : 'hover:bg-slate-50/60 dark:hover:bg-slate-900/30'
                     }`}
                   >
                     <div className="flex items-center gap-3 truncate">
                       <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs ${
                         isSelected 
-                          ? 'bg-sky-500 text-white' 
-                          : 'bg-slate-100 dark:bg-slate-900 text-slate-650 dark:text-slate-400'
+                          ? isOverdue ? 'bg-red-500 text-white' : 'bg-sky-500 text-white'
+                          : isOverdue
+                            ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
+                            : 'bg-slate-100 dark:bg-slate-900 text-slate-650 dark:text-slate-400'
                       }`}>
                         {customer.name.charAt(0)}
                       </div>
                       <div className="truncate">
-                        <span className="block font-bold text-slate-850 dark:text-white truncate">
-                          {customer.name}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className={`block font-bold truncate ${isOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-850 dark:text-white'}`}>
+                            {customer.name}
+                          </span>
+                          {isOverdue && (
+                            <span className="shrink-0 px-1.5 py-0.5 rounded text-4xs font-black uppercase tracking-wider bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400">
+                              Due
+                            </span>
+                          )}
+                        </div>
                         <span className="block text-3xs font-mono text-sky-500 mt-0.5 font-bold">
                           Code: {customer.customer_code}
                         </span>
