@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Customer, MilkEntry, Payment } from '../../utils/seedData';
 import { useDb } from '../../context/DbContext';
-import { calculateCustomerBilling, calculateCustomerUnpaidPeriod, getCustomerDailyDeliveries, formatCurrency } from '../../utils/calculations';
+import { calculateCustomerBilling, calculateCustomerUnpaidPeriod, getCustomerDailyDeliveries, formatCurrency, BASELINE_START_DATE } from '../../utils/calculations';
 import { printReceipt, exportRegisterToCSV } from '../../services/pdfGenerator';
 import { 
   ArrowLeft, 
@@ -218,14 +218,17 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
 
     setModalStatus('saving');
     try {
-      // Calculate paid_till_date automatically based on chronological deliveries
-      const deliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
-      const customerPayments = payments.filter(p => p.customer_id === customer.id);
+      // Calculate paid_till_date automatically based on chronological deliveries starting from September 1, 2026
+      const allDeliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
+      const deliveries = allDeliveries.filter(d => d.date >= BASELINE_START_DATE);
+      const customerPayments = payments.filter(
+        p => p.customer_id === customer.id && p.payment_date >= BASELINE_START_DATE
+      );
       const totalPaidBefore = customerPayments.reduce((sum, p) => sum + Number(p.amount), 0);
       const newTotalPaid = totalPaidBefore + Number(amount);
 
       let coveredPaid = newTotalPaid;
-      let computedPaidTill = customer.created_at ? customer.created_at.split('T')[0] : todayStr;
+      let computedPaidTill = deliveries.length > 0 ? deliveries[0].date : (customer.created_at ? customer.created_at.split('T')[0] : todayStr);
 
       for (const delivery of deliveries) {
         if (delivery.cost === 0) continue;
@@ -460,8 +463,8 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
         </div>
       )}
 
-      {/* 4 Clean Summary Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      {/* 3 Clean Summary Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
         {/* Box 1: Daily Delivery & Rate */}
         <div className="p-4.5 rounded-2xl bg-slate-50/70 dark:bg-slate-900/60 border border-slate-150 dark:border-slate-850 flex flex-col justify-between">
           <div>
@@ -519,22 +522,6 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
             <span className={`font-bold ${billing.hasOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-300'}`}>
               {customer.rate_per_liter > 0 ? (billing.previousMonthPending / customer.rate_per_liter).toFixed(1) : '0.0'} L
             </span>
-          </div>
-        </div>
-
-        {/* Box 4: Total Balance Due */}
-        <div className="p-4.5 rounded-2xl bg-sky-500/10 dark:bg-sky-500/10 border border-sky-500/20 flex flex-col justify-between">
-          <div>
-            <span className="block text-3xs font-bold text-sky-600 dark:text-sky-400 uppercase tracking-wider mb-1">
-              Total Balance Due
-            </span>
-            <span className={`block text-base font-black ${billing.pendingAmount > 0 ? (billing.hasOverdue ? 'text-red-500' : 'text-sky-600') : 'text-emerald-600'}`}>
-              {formatCurrency(billing.pendingAmount)}
-            </span>
-          </div>
-          <div className="mt-2 pt-2 border-t border-sky-500/15 flex items-center justify-between text-3xs">
-            <span className="text-slate-400 font-semibold">Total Due Milk:</span>
-            <span className="font-bold text-sky-600 dark:text-sky-400">{billing.dueMilkLitres.toFixed(1)} L</span>
           </div>
         </div>
       </div>
