@@ -87,6 +87,41 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
     return calculateCustomerUnpaidPeriod(customer, milkEntries, payments, todayStr);
   }, [customer, milkEntries, payments, todayStr]);
 
+  // ── Bill Month Logic ──
+  // The "bill month" is the last fully-completed month.
+  // If today is the last day of the current month → bill = current month.
+  // Otherwise → bill = previous month.
+  const getBillMonthBilling = () => {
+    const today = new Date();
+    const todayDay = today.getDate();
+    const daysInCurrentMonth = new Date(currentYear, currentMonth, 0).getDate();
+    const isLastDayOfMonth = todayDay === daysInCurrentMonth;
+
+    let billYear: number;
+    let billMonth: number;
+    if (isLastDayOfMonth) {
+      // Today is the last day — bill is for the current month up to today
+      billYear = currentYear;
+      billMonth = currentMonth;
+    } else {
+      // Otherwise bill is for the previous (last completed) month
+      const prevDate = new Date(currentYear, currentMonth - 2, 1);
+      billYear = prevDate.getFullYear();
+      billMonth = prevDate.getMonth() + 1;
+    }
+
+    // Compute billing for that specific month (pass end-of-bill-month as upToDate)
+    const billMonthEnd = new Date(billYear, billMonth, 0); // last day of bill month
+    const billMonthEndStr = `${billYear}-${String(billMonth).padStart(2, '0')}-${String(billMonthEnd.getDate()).padStart(2, '0')}`;
+    // Use todayStr if it falls within the bill month (e.g. last day of current month)
+    const upTo = billMonthEndStr < todayStr ? billMonthEndStr : todayStr;
+
+    const billMonthBilling = calculateCustomerBilling(customer, milkEntries, payments, billYear, billMonth, upTo);
+    const billMonthName = new Date(billYear, billMonth - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+
+    return { billMonthBilling, billMonthName, billYear, billMonth };
+  };
+
   // WhatsApp template for entire bill
   const getWhatsAppMessage = () => {
     const msg = `*Salman Khan's Dairy — Account Statement*\n` +
@@ -103,14 +138,16 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
     return encodeURIComponent(msg);
   };
 
-  // Short WhatsApp bill message for unpaid period
+  // Short WhatsApp bill message — bill period, milk delivered, total bill only
   const getWhatsAppUnpaidMessage = () => {
+    const { billMonthBilling, billMonthName } = getBillMonthBilling();
+
     const msg =
-      `*Salman Khan's Dairy — Unpaid Bill*\n` +
+      `*Salman Khan's Dairy — Monthly Bill*\n` +
       `Customer: *${customer.name}*\n\n` +
-      `📅 Period: ${unpaidInfo.unpaidStartDate} → ${todayStr}\n` +
-      `🧴 Due Milk: *${billing.dueMilkLitres.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
-      `💰 Due Amount: *${formatCurrency(billing.pendingAmount)}*\n\n` +
+      `📅 Bill Period: *${billMonthName}*\n` +
+      `🥛 Milk Delivered: *${billMonthBilling.currentMonthMilkConsumed.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
+      `💵 Total Bill: *${formatCurrency(billMonthBilling.currentMonthBill)}*\n\n` +
       `Kindly clear your dues. Shukriya!\n\n` +
       `— *Salman Khan*`;
     return encodeURIComponent(msg);
