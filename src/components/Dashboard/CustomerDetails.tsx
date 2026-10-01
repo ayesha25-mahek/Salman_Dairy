@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Customer, MilkEntry, Payment } from '../../utils/seedData';
 import { useDb } from '../../context/DbContext';
-import { calculateCustomerBilling, calculateCustomerUnpaidPeriod, getCustomerDailyDeliveries, formatCurrency, BASELINE_START_DATE } from '../../utils/calculations';
+import { calculateCustomerBilling, calculateCustomerUnpaidPeriod, getCustomerDailyDeliveries, formatCurrency, BASELINE_START_DATE, isCyclePayment } from '../../utils/calculations';
 import { printReceipt, exportRegisterToCSV } from '../../services/pdfGenerator';
 import { 
   ArrowLeft, 
@@ -124,32 +124,69 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
 
   // WhatsApp template for entire bill
   const getWhatsAppMessage = () => {
-    const msg = `*Salman Khan's Dairy — Account Statement*\n` +
-      `Customer: *${customer.name}*\n` +
-      `• Code: *${customer.customer_code}*\n` +
-      `• Total Milk Delivered: *${billing.totalMilkConsumed.toFixed(1)} Litres*\n` +
-      `• Milk Paid For: *${billing.paidMilkLitres.toFixed(1)} Litres* (${formatCurrency(billing.totalPaid)})\n` +
-      `• Rate: *Rs. ${customer.rate_per_liter}/L*\n` +
-      `-----------------------------\n` +
+    const { billMonthBilling, billYear, billMonth } = getBillMonthBilling();
+    const billMonthLabel = new Date(billYear, billMonth - 1, 1).toLocaleString('default', { month: 'long', year: 'numeric' });
+    const prevLitres = billMonthBilling.currentMonthMilkConsumed;
+    const prevTotal = billMonthBilling.currentMonthBill;
+    const prevDue = billing.previousMonthPending;
+
+    let msg = `*Salman Khan's Dairy — Bill Statement*\n` +
+      `Customer: *${customer.name}* (Code: ${customer.customer_code})\n` +
+      `• Rate: *Rs. ${customer.rate_per_liter}/L*\n\n` +
+      `📅 *${billMonthLabel} Bill:*\n` +
+      `• Milk Delivered: *${prevLitres.toFixed(1)} Litres*\n` +
+      `• Month Total: *${formatCurrency(prevTotal)}*\n` +
+      `• Status: *${prevDue > 0.01 ? '🔴 Due ' + formatCurrency(prevDue) : '✅ Paid'}*\n\n`;
+
+    if (billing.currentMonthMilkConsumed > 0) {
+      msg += `📅 *${currentMonthName} (Running):*\n` +
+        `• Milk Delivered so far: *${billing.currentMonthMilkConsumed.toFixed(1)} Litres*\n` +
+        `• Running Bill: *${formatCurrency(billing.currentMonthBill)}*\n\n`;
+    }
+
+    msg += `-----------------------------\n` +
       `*Total Due Milk: ${billing.dueMilkLitres.toFixed(1)} Litres*\n` +
       `*Total Balance Due: ${formatCurrency(billing.pendingAmount)}*\n\n` +
-      `Kindly clear your outstanding balance. Thank you!\n\n` +
-      `— *Salman Khan*`;
+      `Kindly clear your dues. Thank you!\n\n` +
+      `— *Salman Khan's Dairy*`;
     return encodeURIComponent(msg);
   };
 
-  // Short WhatsApp bill message — bill period, milk delivered, total bill only
+  // Short WhatsApp bill message — previous month bill with per-customer litres × rate
   const getWhatsAppUnpaidMessage = () => {
-    const { billMonthBilling, billMonthName } = getBillMonthBilling();
+    const { billMonthBilling, billYear, billMonth } = getBillMonthBilling();
 
-    const msg =
-      `*Salman Khan's Dairy — Monthly Bill*\n` +
-      `Customer: *${customer.name}*\n\n` +
-      `📅 Bill Period: *${billMonthName}*\n` +
-      `🥛 Milk Delivered: *${billMonthBilling.currentMonthMilkConsumed.toFixed(1)} L* @ Rs.${customer.rate_per_liter}/L\n` +
-      `💵 Total Bill: *${formatCurrency(billMonthBilling.currentMonthBill)}*\n\n` +
-      `Kindly clear your dues. Shukriya!\n\n` +
-      `— *Salman Khan*`;
+    // Total litres for the bill month (actual entries + default_qty for unrecorded days)
+    const billMonthLitres = billMonthBilling.currentMonthMilkConsumed;
+    const billMonthTotal  = billMonthBilling.currentMonthBill;
+
+    // What is actually still outstanding = total billed − all payments made so far
+    // billing.previousMonthPending already accounts for partial payments correctly
+    const outstanding = billing.previousMonthPending;
+    const alreadyPaid = billMonthTotal > outstanding + 0.01
+      ? billMonthTotal - outstanding
+      : 0;
+
+    const billMonthLabel = new Date(billYear, billMonth - 1, 1)
+      .toLocaleString('default', { month: 'long', year: 'numeric' });
+
+    let msg =
+      `*Salman Khan's Dairy — Unpaid Bill*\n` +
+      `Customer: *${customer.name}* (Code: ${customer.customer_code})\n\n` +
+      `📅 Bill Month: *${billMonthLabel}*\n` +
+      `🥛 Milk Delivered: *${billMonthLitres.toFixed(1)} Litres*\n` +
+      `💲 Rate: *Rs. ${customer.rate_per_liter}/Litre*\n` +
+      `💵 Month Total: *${formatCurrency(billMonthTotal)}*\n`;
+
+    if (alreadyPaid > 0.01) {
+      msg += `✅ Already Paid: *${formatCurrency(alreadyPaid)}*\n`;
+    }
+
+    msg +=
+      `\n🔴 *Outstanding Due: ${formatCurrency(outstanding)}*\n\n` +
+      `Kindly clear your outstanding dues at the earliest. Shukriya! 🙏\n\n` +
+      `— *Salman Khan's Dairy*`;
+
     return encodeURIComponent(msg);
   };
 
@@ -259,7 +296,7 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
       const allDeliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
       const deliveries = allDeliveries.filter(d => d.date >= BASELINE_START_DATE);
       const customerPayments = payments.filter(
-        p => p.customer_id === customer.id && p.payment_date >= BASELINE_START_DATE
+        p => p.customer_id === customer.id && isCyclePayment(p)
       );
       const totalPaidBefore = customerPayments.reduce((sum, p) => sum + Number(p.amount), 0);
       const newTotalPaid = totalPaidBefore + Number(amount);
@@ -446,22 +483,19 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
           
           {/* Status badge */}
           <div className="self-start sm:self-center">
-            {billing.status === 'Paid' && (
-              <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                Paid
-              </span>
-            )}
-            {billing.hasOverdue && (
+            {billing.hasOverdue ? (
               <span className="inline-flex items-center rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold text-red-500 border border-red-500/20">
                 Overdue (Last Month Pending)
               </span>
-            )}
-            {!billing.hasOverdue && billing.status === 'Partially Paid' && (
+            ) : billing.pendingAmount <= 0.01 ? (
+              <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                Paid
+              </span>
+            ) : billing.totalPaid > 0 ? (
               <span className="inline-flex items-center rounded-full bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-600 dark:text-sky-400 border border-sky-500/20">
                 Partially Paid
               </span>
-            )}
-            {!billing.hasOverdue && billing.status === 'Pending' && (
+            ) : (
               <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-xs font-bold text-slate-650 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                 Current Month Dues
               </span>
@@ -475,30 +509,69 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
       </div>
 
       {/* ── Last Month Overdue Red Section ── */}
-      {billing.hasOverdue && (
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between p-4 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-600 dark:text-red-400 gap-3">
-          <div className="flex items-center gap-2.5">
-            <AlertCircle size={18} className="text-red-500 shrink-0" />
-            <div>
-              <span className="block font-black text-xs uppercase tracking-wide">
-                Last Month Amount Pending: {formatCurrency(billing.previousMonthPending)}
-              </span>
-              <span className="block text-3xs text-red-500/80 mt-0.5">
-                Unpaid balance from {billing.previousMonthName} / past months. Recording payment for this amount will clear this red overdue alert.
+      {billing.hasOverdue && (() => {
+        const { billMonthBilling, billYear, billMonth } = getBillMonthBilling();
+        const prevMonthTotal = billMonthBilling.currentMonthBill;
+        const prevMonthLitres = billMonthBilling.currentMonthMilkConsumed;
+        const prevMonthLabel = new Date(billYear, billMonth - 1, 1)
+          .toLocaleString('default', { month: 'long', year: 'numeric' });
+        const paidSoFar = prevMonthTotal > billing.previousMonthPending + 0.01
+          ? prevMonthTotal - billing.previousMonthPending
+          : 0;
+        return (
+          <div className="rounded-2xl bg-red-500/10 border border-red-500/30 overflow-hidden">
+            {/* Red header bar */}
+            <div className="flex items-center gap-2 px-4 pt-3 pb-2">
+              <AlertCircle size={16} className="text-red-500 shrink-0" />
+              <span className="font-black text-xs uppercase tracking-wide text-red-600 dark:text-red-400">
+                ⚠️ {billing.previousMonthName} Bill Unpaid
               </span>
             </div>
+            {/* Detail rows */}
+            <div className="px-4 pb-1 grid grid-cols-2 sm:grid-cols-3 gap-x-6 gap-y-1 text-3xs text-red-600/80 dark:text-red-400/80">
+              <div>
+                <span className="text-red-400 font-semibold block">Bill Month</span>
+                <span className="font-bold text-red-600 dark:text-red-300">{prevMonthLabel}</span>
+              </div>
+              <div>
+                <span className="text-red-400 font-semibold block">Milk Delivered</span>
+                <span className="font-bold text-red-600 dark:text-red-300">
+                  {prevMonthLitres.toFixed(1)} L × Rs.{customer.rate_per_liter}
+                </span>
+              </div>
+              <div>
+                <span className="text-red-400 font-semibold block">Month Total</span>
+                <span className="font-bold text-red-600 dark:text-red-300">{formatCurrency(prevMonthTotal)}</span>
+              </div>
+              {paidSoFar > 0.01 && (
+                <div>
+                  <span className="text-red-400 font-semibold block">Paid So Far</span>
+                  <span className="font-bold text-emerald-600 dark:text-emerald-400">{formatCurrency(paidSoFar)}</span>
+                </div>
+              )}
+              <div className="col-span-2 sm:col-span-1">
+                <span className="text-red-400 font-semibold block">Still Outstanding</span>
+                <span className="font-black text-red-600 dark:text-red-300 text-xs">{formatCurrency(billing.previousMonthPending)}</span>
+              </div>
+            </div>
+            {/* Info + action */}
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 px-4 py-3 border-t border-red-500/20 mt-1">
+              <span className="text-3xs text-red-500/70 italic">
+                Red clears only after full Mark Payment of {billing.previousMonthName} bill.
+              </span>
+              <button
+                onClick={() => {
+                  setAmount(billing.previousMonthPending.toString());
+                  setShowPaymentModal(true);
+                }}
+                className="shrink-0 px-3.5 py-1.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-2xs uppercase tracking-wider shadow-xs transition"
+              >
+                Clear {billing.previousMonthName} Dues
+              </button>
+            </div>
           </div>
-          <button
-            onClick={() => {
-              setAmount(billing.previousMonthPending.toString());
-              setShowPaymentModal(true);
-            }}
-            className="shrink-0 px-3.5 py-1.5 rounded-xl bg-red-500 hover:bg-red-600 text-white font-bold text-2xs uppercase tracking-wider shadow-xs transition"
-          >
-            Clear Last Month Dues
-          </button>
-        </div>
-      )}
+        );
+      })()}
 
       {/* 3 Clean Summary Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
@@ -534,33 +607,58 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
           </div>
         </div>
 
-        {/* Box 3: Last Month's Pending (Dynamic previous month name) */}
-        <div className={`p-4.5 rounded-2xl flex flex-col justify-between ${
-          billing.hasOverdue 
-            ? 'bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40' 
-            : 'bg-slate-50/70 dark:bg-slate-900/60 border border-slate-150 dark:border-slate-850'
-        }`}>
-          <div>
-            <span className={`block text-3xs font-bold uppercase tracking-wider mb-1 ${
-              billing.hasOverdue ? 'text-red-500 font-bold' : 'text-slate-400'
+        {/* Box 3: September / Previous Month Bill Status */}
+        {(() => {
+          const { billMonthBilling: prevBilling, billYear: pYear, billMonth: pMonth } = getBillMonthBilling();
+          const prevTotalLitres = prevBilling.currentMonthMilkConsumed;
+          const prevTotalBill   = prevBilling.currentMonthBill;
+          const prevMonthLabel  = new Date(pYear, pMonth - 1, 1)
+            .toLocaleString('default', { month: 'long' });
+
+          return (
+            <div className={`p-4.5 rounded-2xl flex flex-col justify-between ${
+              billing.hasOverdue
+                ? 'bg-red-50/50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/40'
+                : 'bg-emerald-50/40 dark:bg-emerald-950/20 border border-emerald-100 dark:border-emerald-900/40'
             }`}>
-              Last Month's Pending ({billing.previousMonthName})
-            </span>
-            <span className={`block text-base font-black ${
-              billing.hasOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-800 dark:text-white'
-            }`}>
-              {formatCurrency(billing.previousMonthPending)}
-            </span>
-          </div>
-          <div className={`mt-2 pt-2 border-t flex items-center justify-between text-3xs ${
-            billing.hasOverdue ? 'border-red-100 dark:border-red-900/30' : 'border-slate-200/60 dark:border-slate-800'
-          }`}>
-            <span className="text-slate-400 font-semibold">Unpaid Litres:</span>
-            <span className={`font-bold ${billing.hasOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-300'}`}>
-              {customer.rate_per_liter > 0 ? (billing.previousMonthPending / customer.rate_per_liter).toFixed(1) : '0.0'} L
-            </span>
-          </div>
-        </div>
+              <div>
+                <span className={`block text-3xs font-bold uppercase tracking-wider mb-1 ${
+                  billing.hasOverdue ? 'text-red-500 font-bold' : 'text-emerald-600 dark:text-emerald-400 font-bold'
+                }`}>
+                  {prevMonthLabel} Bill {billing.hasOverdue ? '🔴 Unpaid' : '✅ Paid'}
+                </span>
+                {/* Previous month total litres & bill */}
+                <span className="block text-3xs text-slate-500 dark:text-slate-400 mb-0.5">
+                  {prevTotalLitres.toFixed(1)} L × Rs.{customer.rate_per_liter} = {formatCurrency(prevTotalBill)}
+                </span>
+                {/* Outstanding remaining */}
+                <span className={`block text-base font-black ${
+                  billing.hasOverdue
+                    ? 'text-red-600 dark:text-red-400'
+                    : 'text-emerald-600 dark:text-emerald-400'
+                }`}>
+                  {billing.hasOverdue
+                    ? `Due: ${formatCurrency(billing.previousMonthPending)}`
+                    : `Paid ✓`}
+                </span>
+              </div>
+              <div className={`mt-2 pt-2 border-t flex items-center justify-between text-3xs ${
+                billing.hasOverdue
+                  ? 'border-red-100 dark:border-red-900/30'
+                  : 'border-slate-200/60 dark:border-slate-800'
+              }`}>
+                <span className="text-slate-400 font-semibold">
+                  {billing.hasOverdue ? 'Outstanding Litres:' : 'Delivered Litres:'}
+                </span>
+                <span className={`font-bold ${billing.hasOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-600 dark:text-slate-300'}`}>
+                  {billing.hasOverdue
+                    ? `${customer.rate_per_liter > 0 ? (billing.previousMonthPending / customer.rate_per_liter).toFixed(1) : '0.0'} L`
+                    : `${prevTotalLitres.toFixed(1)} L`}
+                </span>
+              </div>
+            </div>
+          );
+        })()}
       </div>
 
       {/* Interactive Communication Buttons */}
@@ -595,7 +693,10 @@ export const CustomerDetails: React.FC<CustomerDetailsProps> = ({ customer, onBa
 
       {/* Secondary control button */}
       <button
-        onClick={() => printReceipt(customer, milkEntries, payments, currentYear, currentMonth)}
+        onClick={() => {
+          const { billYear, billMonth } = getBillMonthBilling();
+          printReceipt(customer, milkEntries, payments, billYear, billMonth);
+        }}
         className="w-full flex items-center justify-center gap-2 py-3 rounded-2xl border border-slate-200 dark:border-slate-880 hover:bg-slate-50 dark:hover:bg-slate-900 text-slate-700 dark:text-slate-200 text-xs font-bold uppercase transition focus:outline-none"
       >
         <PlusCircle size={14} className="text-sky-500" />

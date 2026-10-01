@@ -98,22 +98,19 @@ export const CustomerLookup: React.FC = () => {
 
                 {/* Status Badge */}
                 <div>
-                  {billingDetails.status === 'Paid' && (
-                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
-                      Paid
-                    </span>
-                  )}
-                  {billingDetails.hasOverdue && (
+                  {billingDetails.hasOverdue ? (
                     <span className="inline-flex items-center rounded-full bg-red-500/10 px-3 py-1 text-xs font-bold text-red-500 border border-red-500/20">
                       Overdue (Past Dues)
                     </span>
-                  )}
-                  {!billingDetails.hasOverdue && billingDetails.status === 'Partially Paid' && (
+                  ) : billingDetails.pendingAmount <= 0.01 ? (
+                    <span className="inline-flex items-center rounded-full bg-emerald-500/10 px-3 py-1 text-xs font-bold text-emerald-600 dark:text-emerald-400 border border-emerald-500/20">
+                      Paid
+                    </span>
+                  ) : billingDetails.totalPaid > 0 ? (
                     <span className="inline-flex items-center rounded-full bg-sky-500/10 px-3 py-1 text-xs font-bold text-sky-600 dark:text-sky-400 border border-sky-500/20">
                       Partially Paid
                     </span>
-                  )}
-                  {!billingDetails.hasOverdue && billingDetails.status === 'Pending' && (
+                  ) : (
                     <span className="inline-flex items-center rounded-full bg-slate-100 dark:bg-slate-800 px-3 py-1 text-xs font-bold text-slate-650 dark:text-slate-300 border border-slate-200 dark:border-slate-700">
                       Current Month Dues
                     </span>

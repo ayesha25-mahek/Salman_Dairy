@@ -62,8 +62,11 @@ export const getCustomerDailyDeliveries = (
   const createdDate = customer.created_at ? customer.created_at.split('T')[0] : upToDate;
   const deactivatedDate = customer.deactivated_at ? customer.deactivated_at.split('T')[0] : null;
 
-  // Earliest date is either creation date or the earliest recorded milk entry
-  let earliestDate = createdDate;
+  // Earliest date is BASELINE_START_DATE (2026-09-01) so all customers active in this cycle have full September milk
+  let earliestDate = BASELINE_START_DATE;
+  if (createdDate < earliestDate) {
+    earliestDate = createdDate;
+  }
   customerEntries.forEach(e => {
     if (e.date < earliestDate) {
       earliestDate = e.date;
@@ -92,10 +95,8 @@ export const getCustomerDailyDeliveries = (
     let qty: number;
     if (entryMap.has(dateStr)) {
       qty = entryMap.get(dateStr)!;
-    } else if (dateStr >= createdDate) {
-      qty = Number(customer.default_quantity || 0);
     } else {
-      qty = 0;
+      qty = Number(customer.default_quantity || 0);
     }
 
     deliveries.push({
@@ -113,6 +114,18 @@ export const getCustomerDailyDeliveries = (
 export const BASELINE_START_DATE = '2026-09-01';
 
 /**
+ * Determines if a payment belongs to the active billing cycle (September 2026 onwards).
+ * Historical payments recorded in early September (Sept 1-6) with paid_till_date in August
+ * were settlements for the previous August cycle and must not be counted against September deliveries.
+ */
+export const isCyclePayment = (p: Payment): boolean => {
+  if (p.payment_date < '2026-10-01' && (!p.paid_till_date || p.paid_till_date < '2026-09-30')) {
+    return false;
+  }
+  return true;
+};
+
+/**
  * Calculates the unpaid period, start date, unpaid milk liters, and unpaid cost based on total payments made.
  * Starts from September 1, 2026 baseline.
  */
@@ -125,7 +138,7 @@ export const calculateCustomerUnpaidPeriod = (
   const allDeliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
   const deliveries = allDeliveries.filter(d => d.date >= BASELINE_START_DATE);
   const customerPayments = payments.filter(
-    p => p.customer_id === customer.id && p.payment_date >= BASELINE_START_DATE
+    p => p.customer_id === customer.id && isCyclePayment(p)
   );
   const totalPaid = customerPayments.reduce((sum, p) => sum + Number(p.amount), 0);
 
@@ -186,7 +199,7 @@ export const calculateCustomerBilling = (
   const allDeliveries = getCustomerDailyDeliveries(customer, milkEntries, todayStr);
   const activeCycleDeliveries = allDeliveries.filter(d => d.date >= BASELINE_START_DATE);
   const customerPayments = payments.filter(
-    p => p.customer_id === customer.id && p.payment_date >= BASELINE_START_DATE
+    p => p.customer_id === customer.id && isCyclePayment(p)
   );
 
   // Month identifiers
@@ -252,11 +265,11 @@ export const calculateCustomerBilling = (
 
   // 8. Status Badge
   let status: 'Paid' | 'Partially Paid' | 'Pending' | 'Overdue' = 'Pending';
-  if (dueMilkLitres <= 0.001 || pendingAmount <= 0.01) {
-    status = 'Paid';
-  } else if (hasOverdue) {
+  if (hasOverdue) {
     status = 'Overdue';
-  } else if (totalPaid > 0) {
+  } else if (pendingAmount <= 0.01) {
+    status = 'Paid';
+  } else if (currentMonthPaid > 0 || totalPaid > 0) {
     status = 'Partially Paid';
   }
 
@@ -299,6 +312,7 @@ export const checkCustomerOverdue = (
   return {
     hasOverdue: billing.hasOverdue,
     previousMonthPending: billing.previousMonthPending,
+    previousMonthBilled: billing.previousMonthBilled,
     currentMonthPending: billing.currentMonthPending,
     totalPending: billing.pendingAmount,
     previousMonthName: billing.previousMonthName

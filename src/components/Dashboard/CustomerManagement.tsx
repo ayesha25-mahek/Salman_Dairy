@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useDb } from '../../context/DbContext';
 import { Search, ChevronRight, UserPlus, AlertCircle } from 'lucide-react';
-import { checkCustomerOverdue } from '../../utils/calculations';
+import { checkCustomerOverdue, formatCurrency } from '../../utils/calculations';
 import { CustomerDetails } from './CustomerDetails';
 
 interface CustomerManagementProps {
@@ -91,14 +91,14 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ setActiv
                         ? isOverdue
                           ? 'bg-red-50 dark:bg-red-950/20 border-l-4 border-red-500 pl-3'
                           : 'bg-sky-50 dark:bg-sky-950/20 border-l-4 border-sky-500 pl-3'
-                        : isOverdue 
+                        : isOverdue
                           ? 'bg-red-50/30 hover:bg-red-50/60 dark:hover:bg-red-950/30'
                           : 'hover:bg-slate-50/60 dark:hover:bg-slate-900/30'
                     }`}
                   >
                     <div className="flex items-center gap-3 truncate">
-                      <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs ${
-                        isSelected 
+                      <div className={`w-9 h-9 rounded-full flex items-center justify-center font-bold text-xs shrink-0 ${
+                        isSelected
                           ? isOverdue ? 'bg-red-500 text-white' : 'bg-sky-500 text-white'
                           : isOverdue
                             ? 'bg-red-100 dark:bg-red-900/40 text-red-600 dark:text-red-400'
@@ -106,20 +106,28 @@ export const CustomerManagement: React.FC<CustomerManagementProps> = ({ setActiv
                       }`}>
                         {customer.name.charAt(0)}
                       </div>
-                      <div className="truncate">
-                        <div className="flex items-center gap-1.5">
+                      <div className="truncate min-w-0">
+                        <div className="flex items-center gap-1.5 flex-wrap">
                           <span className={`block font-bold truncate ${isOverdue ? 'text-red-600 dark:text-red-400' : 'text-slate-850 dark:text-white'}`}>
                             {customer.name}
                           </span>
                           {isOverdue && (
-                            <span className="shrink-0 px-1.5 py-0.5 rounded text-4xs font-black uppercase tracking-wider bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400">
-                              Due
+                            <span className="shrink-0 inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-4xs font-black uppercase tracking-wider bg-red-100 dark:bg-red-900/50 text-red-600 dark:text-red-400">
+                              <AlertCircle size={9} />
+                              {overdueInfo.previousMonthName} Due
                             </span>
                           )}
                         </div>
-                        <span className="block text-3xs font-mono text-sky-500 mt-0.5 font-bold">
-                          Code: {customer.customer_code}
-                        </span>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          <span className="block text-3xs font-mono text-sky-500 font-bold">
+                            Code: {customer.customer_code}
+                          </span>
+                          {isOverdue && overdueInfo.previousMonthPending > 0 && (
+                            <span className="block text-3xs font-bold text-red-500">
+                              {formatCurrency(overdueInfo.previousMonthPending)} pending
+                            </span>
+                          )}
+                        </div>
                       </div>
                     </div>
                     <ChevronRight size={14} className="text-slate-400 shrink-0" />
