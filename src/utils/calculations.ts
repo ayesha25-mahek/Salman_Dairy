@@ -62,11 +62,9 @@ export const getCustomerDailyDeliveries = (
   const createdDate = customer.created_at ? customer.created_at.split('T')[0] : upToDate;
   const deactivatedDate = customer.deactivated_at ? customer.deactivated_at.split('T')[0] : null;
 
-  // Earliest date is BASELINE_START_DATE (2026-09-01) so all customers active in this cycle have full September milk
-  let earliestDate = BASELINE_START_DATE;
-  if (createdDate < earliestDate) {
-    earliestDate = createdDate;
-  }
+  // If customer was created before baseline (e.g. July/August), their cycle starts at BASELINE_START_DATE (2026-09-01).
+  // If customer was created AFTER baseline (e.g. mid-September), they only start from their registration date!
+  let earliestDate = createdDate < BASELINE_START_DATE ? BASELINE_START_DATE : createdDate;
   customerEntries.forEach(e => {
     if (e.date < earliestDate) {
       earliestDate = e.date;
@@ -95,8 +93,10 @@ export const getCustomerDailyDeliveries = (
     let qty: number;
     if (entryMap.has(dateStr)) {
       qty = entryMap.get(dateStr)!;
-    } else {
+    } else if (dateStr >= createdDate) {
       qty = Number(customer.default_quantity || 0);
+    } else {
+      qty = 0;
     }
 
     deliveries.push({
