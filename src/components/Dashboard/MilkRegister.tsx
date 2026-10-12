@@ -2,7 +2,8 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { useDb } from '../../context/DbContext';
 import { MilkEntry } from '../../utils/seedData';
 import { getDaysInMonth, checkCustomerOverdue, formatCurrency } from '../../utils/calculations';
-import { Calendar, Search, Save, CheckCircle, AlertCircle, RefreshCw } from 'lucide-react';
+import { Calendar, Search, Save, CheckCircle, AlertCircle, RefreshCw, FileSpreadsheet } from 'lucide-react';
+import * as XLSX from 'xlsx';
 
 export const MilkRegister: React.FC = () => {
   const { customers, milkEntries, payments, saveMilkEntry, saveMilkEntriesBatch, loading } = useDb();
@@ -38,6 +39,17 @@ export const MilkRegister: React.FC = () => {
     const todayStr = getTodayStr();
     return dateStr > todayStr;
   };
+
+  /**
+   * True when the selected month has fully ended (i.e. today is past the last day of that month).
+   * This controls whether the Save Excel button is shown.
+   */
+  const isMonthEnded = useMemo(() => {
+    const todayStr = getTodayStr();
+    // Last day of the selected month
+    const lastDay = `${monthString}-${String(daysCount).padStart(2, '0')}`;
+    return todayStr > lastDay;
+  }, [monthString, daysCount]);
 
   // Load database entries into the local grid state
   // Merges DB values with any locally-dirty (unsaved) edits so edits survive a DB reload
@@ -267,6 +279,93 @@ export const MilkRegister: React.FC = () => {
     }
   };
 
+  // ─── Monthly Due calculation (READ-ONLY, does not write to DB) ──────────────
+
+  /**
+   * Calculates the monthly bill for a customer in the selected month.
+   * Uses only saved milk_entries for the selected month (explicit DB records).
+   * Falls back to getDisplayValue (carry-forward / default) for days without
+   * a DB entry, so the figure matches what the grid shows.
+   * NEVER writes anything back to the database.
+   */
+  const getMonthlyDue = (customerId: string, customerDefaultQty: number, ratePerLiter: number): number => {
+    let totalQty = 0;
+
+    for (const dayDate of monthDays) {
+      // Skip future dates — not billed
+      if (isFutureDate(dayDate)) continue;
+
+      const displayVal = getDisplayValue(customerId, dayDate, customerDefaultQty);
+      if (displayVal === '') continue; // customer inactive / pre-registration
+
+      const qty = parseFloat(displayVal);
+      if (!isNaN(qty)) {
+        totalQty += qty;
+      }
+    }
+
+    return totalQty * ratePerLiter;
+  };
+
+  // ─── Excel Export (READ-ONLY, no DB writes) ──────────────────────────────────
+
+  const monthNames = [
+    '', 'January', 'February', 'March', 'April', 'May', 'June',
+    'July', 'August', 'September', 'October', 'November', 'December'
+  ];
+
+  const handleExportExcel = () => {
+    const monthLabel = `${monthNames[selectedMonth]} ${selectedYear}`;
+
+    // Build header row: Customer | Code | 1 | 2 | ... | 31 | Monthly Due (₹)
+    const headerRow: (string | number)[] = [
+      'Customer',
+      'Code',
+      ...monthDays.map((_, idx) => idx + 1),
+      'Monthly Due (Rs.)'
+    ];
+
+    // Build data rows — read-only from existing state
+    const dataRows = filteredCustomers.map(customer => {
+      const dayValues: (string | number)[] = monthDays.map(dayDate => {
+        if (isFutureDate(dayDate)) return '';
+        const val = getDisplayValue(customer.id, dayDate, customer.default_quantity);
+        if (val === '') return '';
+        const num = parseFloat(val);
+        return isNaN(num) ? '' : num;
+      });
+
+      const monthlyDue = getMonthlyDue(customer.id, customer.default_quantity, customer.rate_per_liter);
+
+      return [
+        customer.name,
+        customer.customer_code,
+        ...dayValues,
+        monthlyDue
+      ];
+    });
+
+    // Worksheet data
+    const wsData = [headerRow, ...dataRows];
+
+    const ws = XLSX.utils.aoa_to_sheet(wsData);
+
+    // Column widths: name(22), code(10), day cols(6 each), due(18)
+    ws['!cols'] = [
+      { wch: 22 },
+      { wch: 10 },
+      ...monthDays.map(() => ({ wch: 6 })),
+      { wch: 18 }
+    ];
+
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, monthLabel);
+
+    XLSX.writeFile(wb, `MilkRegister_${monthNames[selectedMonth]}_${selectedYear}.xlsx`);
+  };
+
+  // ─── Render ──────────────────────────────────────────────────────────────────
+
   return (
     <div className="space-y-6 text-left">
       
@@ -281,8 +380,8 @@ export const MilkRegister: React.FC = () => {
           </p>
         </div>
 
-        {/* Action button */}
-        <div className="flex items-center gap-2">
+        {/* Action buttons */}
+        <div className="flex items-center gap-2 flex-wrap">
           {dirtyKeys.size > 0 && savingState === 'idle' && (
             <span className="flex items-center gap-1 text-2xs text-amber-600 dark:text-amber-400 font-bold bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800/50 px-2.5 py-1 rounded-lg animate-pulse-subtle">
               ● Unsaved edits ({dirtyKeys.size})
@@ -312,6 +411,18 @@ export const MilkRegister: React.FC = () => {
             <Save size={14} />
             <span>Save Register</span>
           </button>
+
+          {/* Save Excel — only shown when the selected month has fully ended */}
+          {isMonthEnded && (
+            <button
+              onClick={handleExportExcel}
+              className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-emerald-600 text-white font-bold hover:bg-emerald-700 shadow-md hover:shadow-emerald-600/10 active:scale-98 transition-all text-xs uppercase tracking-wide"
+              title={`Download ${monthNames[selectedMonth]} ${selectedYear} register as Excel`}
+            >
+              <FileSpreadsheet size={14} />
+              <span>Save Excel</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -378,12 +489,16 @@ export const MilkRegister: React.FC = () => {
                     {idx + 1}
                   </th>
                 ))}
+                {/* Monthly Due column header */}
+                <th className="p-2.5 border-l-2 border-slate-300 dark:border-slate-700 bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 font-bold text-center min-w-[110px] whitespace-nowrap">
+                  Monthly Due (₹)
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100 dark:divide-slate-900 text-xs text-slate-700 dark:text-slate-350">
               {filteredCustomers.length === 0 ? (
                 <tr>
-                  <td colSpan={daysCount + 1} className="py-12 text-center text-slate-450 font-medium">
+                  <td colSpan={daysCount + 2} className="py-12 text-center text-slate-450 font-medium">
                     No customers found. Please add a customer first.
                   </td>
                 </tr>
@@ -391,6 +506,9 @@ export const MilkRegister: React.FC = () => {
                 filteredCustomers.map(customer => {
                   const overdueInfo = checkCustomerOverdue(customer, milkEntries, payments, selectedYear, selectedMonth);
                   const isOverdue = overdueInfo.hasOverdue;
+
+                  // Calculate Monthly Due for this customer (read-only)
+                  const monthlyDue = getMonthlyDue(customer.id, customer.default_quantity, customer.rate_per_liter);
 
                   return (
                   <tr key={customer.id} className="hover:bg-slate-50/40 dark:hover:bg-slate-900/20">
@@ -449,6 +567,13 @@ export const MilkRegister: React.FC = () => {
                         </td>
                       );
                     })}
+
+                    {/* Monthly Due cell — read-only, never written to DB */}
+                    <td className="border-l-2 border-slate-300 dark:border-slate-700 bg-emerald-50/60 dark:bg-emerald-950/20 text-center px-3 py-2 min-w-[110px]">
+                      <span className="font-bold text-emerald-700 dark:text-emerald-400 font-mono whitespace-nowrap">
+                        {formatCurrency(monthlyDue)}
+                      </span>
+                    </td>
                   </tr>
                 );
               })
@@ -471,6 +596,10 @@ export const MilkRegister: React.FC = () => {
         <div className="flex items-center gap-1.5">
           <div className="w-3.5 h-3.5 rounded-sm bg-slate-100 border border-slate-200" />
           <span>Locked Future Dates</span>
+        </div>
+        <div className="flex items-center gap-1.5">
+          <div className="w-3.5 h-3.5 rounded-sm bg-emerald-100 border border-emerald-300" />
+          <span>Monthly Due (read-only)</span>
         </div>
       </div>
 
